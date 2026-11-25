@@ -39,7 +39,7 @@ Carga en las sesiones nuevas, o con `/reload-plugins` en una abierta.
 
 ## Despliegue a toda la organizacion (sin GitHub ni git en los equipos)
 
-Atajo: `.\scripts0A_PUBLICAR.ps1 -Mod <mod>` hace los pasos 2 a 4 y deja el JSON en el portapapeles.
+Atajo: `.\scripts\0A_PUBLICAR.ps1 -Mod <mod>` hace los pasos 2 a 4 y deja el JSON en el portapapeles.
 
 
 1. Subir la version en `plugins/<mod>/.claude-plugin/plugin.json`.
