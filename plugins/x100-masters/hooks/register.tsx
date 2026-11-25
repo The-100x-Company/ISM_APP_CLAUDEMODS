@@ -2,17 +2,19 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Category, MastersProfile, Recommendation } from '../types'
 import { CATEGORIES, CATEGORY_NAMES, HAIKU_SYSTEM, SONNET_SYSTEM, TEXT_METRICS } from './rubric'
-import { AUTOMATION_SKILLS, AUTOMATION_TOOLS, buildProfile, codeValues, dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, mergeLevel, parseJson, prune, totals } from './score'
-import type { TextLevel, Usage } from './score'
-import { BYLINE, TITLE, report, spider, webIcon } from './visuals'
+import { AUTOMATION_SKILLS, AUTOMATION_TOOLS, addReading, buildProfile, codeValues, dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, mergeLevel, parseJson, prune, totals } from './score'
+import type { DayText, TextLevel, Usage } from './score'
+import { finishSweep, newSweep, pickPrompts, scanLine } from './backfill'
+import { BYLINE, TITLE, improvements, report, spider, webIcon } from './visuals'
 
 // «Tu Nivel en Claude» by The 100x Co. Measures how well a person uses Claude on 37 metrics in four
-// categories and sends the scores, never the prompts. Code counts use on every prompt and tool; Haiku reads each 10-prompt
-// window; Sonnet does the full evaluation once a day. Every metric sent names the evaluator behind it.
-// The only thing drawn is one tiny web button that opens the person's own spider charts.
+// categories and sends the scores, never the prompts. On its first run it sweeps the person's last 15 days
+// of local transcripts; after that, code counts every prompt and tool, Haiku reads each 10-prompt window and
+// Sonnet does the full evaluation once a day. What is shown and sent is the average of the last 10 days of use.
 
 const PANE = 'x100-masters'
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
+const SWEEP = 'v1'
 const WINDOW = 10
 const DOMAINS = ['ismomotors.com', 'grupoislo.com']
 // The one door into Supabase (100x-staging): a checked RPC. The publishable key is public by design;
@@ -20,15 +22,18 @@ const DOMAINS = ['ismomotors.com', 'grupoislo.com']
 const ENDPOINT = 'https://oqhqazffrdeegqesukia.supabase.co/rest/v1/rpc/x100_masters_ingest'
 const PUBLISHABLE_KEY = 'sb_publishable_BBepv64edBJZsgY90-ZZOQ_V0j81N55'
 const PERSON = new Set(['composer', 'bridge'])
+const CHUNK = 4 * 1024 * 1024
+
+type Trigger = 'ventana' | 'diaria' | 'cierre' | 'barrido'
+type Excerpt = { at: number; text: string }
 
 const profile = atom({ plugin: 'x100-masters', key: 'profile' } as const, null as MastersProfile | null)
 
-type Excerpt = { at: number; text: string }
-
 const load = async <T,>($: EngineInterface, key: string, fallback: T): Promise<T> => ((await $.store.get(key)) as T | undefined) ?? fallback
 
-// The surface last seen drawing the band: desktop, terminal, vscode or mobile.
+// The surface last seen drawing the band, and whether a sweep is running in this module.
 let surface = ''
+let isSweeping = false
 
 const identity = async ($: EngineInterface) => {
   const who = await $.session.identity().catch(() => undefined)
@@ -40,11 +45,15 @@ const identity = async ($: EngineInterface) => {
 const refresh = async ($: EngineInterface) => {
   const now = Date.now()
   const { email } = await identity($)
-  const usage = prune(await load<Usage>($, 'usage', {}), now)
-  const text = await load<Record<string, TextLevel>>($, 'text', {})
-  const recs = await load<Recommendation[]>($, 'recs', [])
-  const summary = await load<string>($, 'summary', '')
-  const built = buildProfile(email, usage, text, recs, summary, now)
+  const built = buildProfile(
+    email,
+    prune(await load<Usage>($, 'usage', {}), now),
+    await load<DayText>($, 'dayText', {}),
+    await load<Record<string, TextLevel>>($, 'text', {}),
+    await load<Recommendation[]>($, 'recs', []),
+    await load<string>($, 'summary', ''),
+    now,
+  )
   await update($, profile, () => built)
 
   return built
@@ -60,8 +69,8 @@ const touchDay = async ($: EngineInterface, change: (day: Usage[string]) => void
   await $.store.set('usage', usage)
 }
 
-// Builds the package and queues it; sends the queue when the endpoint exists and the person is in a group domain.
-const send = async ($: EngineInterface, trigger: 'ventana' | 'diaria' | 'cierre') => {
+// Builds the package and sends it with whatever is still queued; only group accounts send.
+const send = async ($: EngineInterface, trigger: Trigger) => {
   const who = await identity($)
   if (!who.isAllowed) return
   const built = await refresh($)
@@ -77,10 +86,10 @@ const send = async ($: EngineInterface, trigger: 'ventana' | 'diaria' | 'cierre'
     puntaje: built.score,
     nivel: built.tier,
     categorias: built.categories,
-    metricas: built.metrics.map(metric => ({ id: metric.id, categoria: metric.category, nivel: metric.level, valor: metric.value ?? null, evaluador: metric.evaluator, modelo: metric.model, evaluado: metric.at })),
+    metricas: built.metrics.map(metric => ({ id: metric.id, categoria: metric.category, nivel: metric.level === null ? null : Math.round(metric.level), valor: metric.value ?? metric.level, evaluador: metric.evaluator, modelo: metric.model, evaluado: metric.at })),
     recomendaciones: built.recommendations.map(rec => ({ categoria: rec.category, texto: rec.text, evaluador: rec.evaluator, modelo: rec.model, evaluado: rec.at })),
     resumen: built.summary,
-    uso: { ...totals(usage), valores: codeValues(usage) },
+    uso: { ...totals(usage), dias_promedio: built.days, prompts_promedio: built.prompts, tendencia: built.trend, valores: codeValues(usage) },
   }
   const outbox = [...(await load<unknown[]>($, 'outbox', [])), item].slice(-50)
   const left: unknown[] = []
@@ -95,21 +104,32 @@ const send = async ($: EngineInterface, trigger: 'ventana' | 'diaria' | 'cierre'
   await $.store.set('outbox', left)
 }
 
-// Haiku reads the last 10 prompts against the fixed rubric: specific, cheap, cached prefix.
-const evaluateWindow = async ($: EngineInterface, prompts: string[]) => {
+// Haiku reads 10 prompts against the fixed rubric: specific, cheap, cached prefix.
+const readPrompts = async ($: EngineInterface, prompts: string[]) => {
   const result = await $.model
     .complete({ model: 'haiku', system: HAIKU_SYSTEM, prompt: prompts.map((text, i) => `### Prompt ${i + 1}\n${text}`).join('\n\n'), maxTokens: 900, timeoutMs: 60_000 })
     .catch(() => undefined)
-  const parsed = result?.isAnswered === true ? parseJson(result.text) : undefined
-  if (parsed === undefined) return
-  const at = new Date().toISOString()
+
+  return result?.isAnswered === true ? parseJson(result.text) : undefined
+}
+
+const keepLevels = async ($: EngineInterface, key: string, levels: Record<string, unknown>, evaluator: 'haiku' | 'sonnet', at: string) => {
   const text = await load<Record<string, TextLevel>>($, 'text', {})
-  const levels = (parsed.niveles ?? {}) as Record<string, unknown>
   for (const metric of TEXT_METRICS) {
     const level = Number(levels[metric.id])
-    if (Number.isFinite(level) && level >= 1 && level <= 5) text[metric.id] = mergeLevel(text[metric.id], level, 'haiku', 'haiku', at)
+    if (Number.isFinite(level) && level >= 1 && level <= 5) text[metric.id] = mergeLevel(text[metric.id], level, evaluator, evaluator, at)
   }
   await $.store.set('text', text)
+  const dayText = await load<DayText>($, 'dayText', {})
+  addReading(dayText, key, levels, evaluator === 'sonnet')
+  await $.store.set('dayText', dayText)
+}
+
+const evaluateWindow = async ($: EngineInterface, prompts: string[]) => {
+  const parsed = await readPrompts($, prompts)
+  if (parsed === undefined) return
+  const at = new Date().toISOString()
+  await keepLevels($, dayKey(Date.now()), (parsed.niveles ?? {}) as Record<string, unknown>, 'haiku', at)
   const tips = (parsed.consejos ?? {}) as Record<string, unknown>
   const recs = await load<Recommendation[]>($, 'recs', [])
   const fresh: Recommendation[] = CATEGORIES.filter(category => typeof tips[category] === 'string' && tips[category] !== '').map(category => ({ category, text: String(tips[category]), evaluator: 'haiku', model: 'haiku', at }))
@@ -121,28 +141,22 @@ const evaluateWindow = async ($: EngineInterface, prompts: string[]) => {
 // Once a day Sonnet does the full, detailed evaluation and writes the advice per category.
 const evaluateDaily = async ($: EngineInterface) => {
   const today = dayKey(Date.now())
-  if ((await load<string>($, 'daily', '')) === today) return
+  if (isSweeping || (await load<string>($, 'daily', '')) === today) return
   const built = await refresh($)
   if (built.prompts < 5) return
   await $.store.set('daily', today)
   const excerpts = await load<Excerpt[]>($, 'excerpts', [])
   const prompt = [
-    `Niveles actuales: ${JSON.stringify(built.metrics.map(metric => ({ id: metric.id, nivel: metric.level, evaluador: metric.evaluator, valor: metric.value })))}`,
+    `Niveles actuales (promedio de ${built.days} días): ${JSON.stringify(built.metrics.map(metric => ({ id: metric.id, nivel: metric.level, valor: metric.value })))}`,
     `Uso 30 días: ${JSON.stringify(totals(await load<Usage>($, 'usage', {})))}`,
     'Extractos de prompts recientes:',
     ...excerpts.map(excerpt => `- ${excerpt.text}`),
   ].join('\n')
-  const result = await $.model.complete({ model: 'sonnet', system: SONNET_SYSTEM, prompt, maxTokens: 2_000, timeoutMs: 120_000 }).catch(() => undefined)
+  const result = await $.model.complete({ model: 'sonnet', system: SONNET_SYSTEM, prompt, maxTokens: 2_400, timeoutMs: 120_000 }).catch(() => undefined)
   const parsed = result?.isAnswered === true ? parseJson(result.text) : undefined
   if (parsed === undefined) return
   const at = new Date().toISOString()
-  const text = await load<Record<string, TextLevel>>($, 'text', {})
-  const levels = (parsed.niveles ?? {}) as Record<string, unknown>
-  for (const metric of TEXT_METRICS) {
-    const level = Number(levels[metric.id])
-    if (Number.isFinite(level) && level >= 1 && level <= 5) text[metric.id] = mergeLevel(text[metric.id], level, 'sonnet', 'sonnet', at)
-  }
-  await $.store.set('text', text)
+  await keepLevels($, today, (parsed.niveles ?? {}) as Record<string, unknown>, 'sonnet', at)
   const advice = Array.isArray(parsed.recomendaciones) ? (parsed.recomendaciones as { categoria?: unknown; texto?: unknown }[]) : []
   const recs: Recommendation[] = advice
     .filter(rec => CATEGORIES.includes(rec.categoria as Category) && typeof rec.texto === 'string')
@@ -150,6 +164,53 @@ const evaluateDaily = async ($: EngineInterface) => {
   if (recs.length > 0) await $.store.set('recs', recs)
   if (typeof parsed.resumen === 'string') await $.store.set('summary', parsed.resumen)
   await send($, 'diaria')
+}
+
+// Home folder, taken from where the mod is installed (always under <home>/.claude/).
+const homeOf = (root: string) => root.split(/[\\/]\.claude[\\/]/)[0] ?? root
+const separatorOf = (home: string) => (/^[A-Za-z]:/.test(home) ? '\\' : '/')
+
+// First run: rebuild the last 15 days from the person's local transcripts, read one sample of each day with
+// Haiku, then send. Runs once per person and machine, in the background.
+const sweep = async ($: EngineInterface) => {
+  if (isSweeping || (await load<string>($, 'barrido', '')) === SWEEP) return
+  isSweeping = true
+  try {
+    const now = Date.now()
+    const state = newSweep(now)
+    const home = homeOf($.plugin.root)
+    const sep = separatorOf(home)
+    const projects = `${home}${sep}.claude${sep}projects`
+    const folders = (await $.fs.list(projects).catch(() => [])).filter(entry => entry.kind === 'dir')
+    for (const folder of folders) {
+      const files = (await $.fs.list(`${projects}${sep}${folder.name}`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.jsonl') && entry.mtimeMs >= state.since)
+      for (const file of files) {
+        const path = `${projects}${sep}${folder.name}${sep}${file.name}`
+        let carry = ''
+        for (let offset = 0; offset < file.size; offset += CHUNK) {
+          const chunk = await $.fs.read(path, { offset, length: CHUNK }).catch(() => '')
+          if (typeof chunk !== 'string' || chunk === '') break
+          const lines = (carry + chunk).split('\n')
+          carry = lines.pop() ?? ''
+          if (carry.length > 8 * CHUNK) carry = ''
+          for (const line of lines) scanLine(state, line)
+        }
+        if (carry !== '') scanLine(state, carry)
+      }
+    }
+    const swept = finishSweep(state)
+    // The sweep is the truth for the days it saw; live counters keep only days it did not see.
+    const usage = { ...(await load<Usage>($, 'usage', {})), ...swept }
+    await $.store.set('usage', prune(usage, now))
+    for (const key of Object.keys(swept).sort().slice(-15)) {
+      const parsed = await readPrompts($, pickPrompts(state.samples[key] ?? []))
+      if (parsed !== undefined) await keepLevels($, key, (parsed.niveles ?? {}) as Record<string, unknown>, 'haiku', new Date(now).toISOString())
+    }
+    await $.store.set('barrido', SWEEP)
+    await send($, 'barrido')
+  } finally {
+    isSweeping = false
+  }
 }
 
 // Counts a person's prompt and queues it for the next Haiku window. Never blocks the prompt.
@@ -176,42 +237,39 @@ const observePrompt = async ($: EngineInterface, text: string) => {
   } else await $.store.set('window', window)
 }
 
-// Home folder, taken from where the mod is installed (always under <home>/.claude/).
-const homeOf = (root: string) => root.split(/[\\/]\.claude[\\/]/)[0] ?? root
-
 const openPane = async ($: EngineInterface) => {
   await refresh($)
   await $.ui.open({ id: PANE, title: `${TITLE} ${BYLINE}` })
 }
 
-// The full report: a self-contained HTML page written next to the person's Claude settings and opened in the browser.
+// The portal: a self-contained HTML page written next to the person's Claude settings and opened in the browser.
 const openReport = async ($: EngineInterface) => {
   const built = await refresh($)
   const home = homeOf($.plugin.root)
-  const isWindows = /^[A-Za-z]:/.test(home)
-  const sep = isWindows ? '\\' : '/'
+  const sep = separatorOf(home)
   const path = `${home}${sep}.claude${sep}tu-nivel-en-claude.html`
   await $.fs.write(path, report(built))
-  const argv = isWindows ? ['explorer.exe', path] : [/^\/Users\//.test(home) ? 'open' : 'xdg-open', path]
+  const argv = sep === '\\' ? ['explorer.exe', path] : [/^\/Users\//.test(home) ? 'open' : 'xdg-open', path]
   await $.process.run(argv).catch(() => undefined)
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'masters', description: 'Tu Nivel en Claude (The 100x Co): tus arañas y recomendaciones' })
+    await $.command.register({ name: 'masters', description: 'Tu Nivel en Claude (The 100x Co): tus arañas y cómo subir' })
     await touchDay($, day => {
       day.sessions += 1
     })
     void refresh($)
+    void sweep($).catch(() => undefined)
 
     return next(e)
   })
 
   on('command.run', { command: 'masters' }, async ($, e) => {
-    if (/reporte|html|grande/i.test(e.args ?? '')) {
+    if (/reporte|portal|html|grande/i.test(e.args ?? '')) {
       await openReport($)
 
-      return { text: 'Reporte abierto en el navegador.' }
+      return { text: 'Portal abierto en el navegador.' }
     }
     await openPane($)
 
@@ -259,7 +317,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The only mark on screen: a tiny hairline web that opens the person's evaluation.
+  // The only mark on screen, one line high: the turning web and, beside it, the button with the score.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     surface = e.surface
     if (e.props.hasSurvey) return next(e)
@@ -267,32 +325,22 @@ export const register: Register = on => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Text } = elements
     const Svg = 'Svg' in elements ? elements.Svg : undefined
-    // A Button holds only text, so on surfaces that draw SVG the web sits under a blank Button laid over it.
-    const icon = Svg ? (
-      <Box key="masters-web" position="relative" width={20} height={20}>
-        <Svg source={webIcon(20)} alt={TITLE} width={20} height={20} />
-        <Box key="masters-hit" position="absolute" top={0} left={0}>
+    const shown = await read($, profile)
+
+    return (
+      <Box flexDirection="row" alignItems="center" gap={1}>
+        {inner}
+        <Box key="masters" flexDirection="row" alignItems="center" gap={1}>
+          {Svg ? <Svg key="masters-web" source={webIcon(14)} alt={TITLE} width={14} height={14} /> : null}
           <Button key="masters-open" plain label={TITLE} onPress={() => openPane($)}>
-            <Text>{'  '}</Text>
+            <Text color="#84888E" hover={{ color: '#E6E8EA' }}>{shown === null ? 'Tu nivel' : `Tu nivel ${shown.score}`}</Text>
           </Button>
         </Box>
-      </Box>
-    ) : (
-      <Button key="masters-open" plain onPress={() => openPane($)}>
-        <Text color="#84888E">✳</Text>
-      </Button>
-    )
-
-    return inner === null || inner === undefined ? (
-      <Box key="masters" alignSelf="flex-end">{icon}</Box>
-    ) : (
-      <Box flexDirection="column">
-        {inner}
-        <Box key="masters" alignSelf="flex-end">{icon}</Box>
       </Box>
     )
   })
 
+  // The panel: the title and the spiders; hover carries the detail; under each, at most five ways to improve.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Text } = elements
@@ -302,26 +350,24 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1} paddingX={1}>
         <Box key="head" flexDirection="row" justifyContent="space-between">
-          <Text bold>{`${TITLE} ${BYLINE}   ${shown.score}/100 · ${shown.tier}`}</Text>
-          <Button key="masters-report" plain onPress={() => openReport($)}>
-            <Text color="#6D92D6">Abrir reporte completo ↗</Text>
+          <Text bold>{`${TITLE} ${BYLINE} · ${shown.score} · ${shown.tier}`}</Text>
+          <Button key="masters-report" plain label="Abrir el portal" onPress={() => openReport($)}>
+            <Text color="#6D92D6">↗</Text>
           </Button>
         </Box>
-        {shown.summary !== '' && <Text color="#A9ADB1">{shown.summary}</Text>}
         {CATEGORIES.map(category => (
           <Box key={`cat-${category}`} flexDirection="column">
             {Svg ? (
-              <Svg source={spider(shown, category, 520)} alt={`${CATEGORY_NAMES[category]}: ${shown.categories[category] ?? 'sin datos'}`} width={520} isInteractive />
+              <Svg source={spider(shown, category, 560)} alt={`${CATEGORY_NAMES[category]}: ${shown.categories[category] ?? 'sin datos'}`} width={560} isInteractive />
             ) : (
               <Text bold>{`${CATEGORY_NAMES[category]} · ${shown.categories[category] ?? '—'}`}</Text>
             )}
-            {shown.recommendations
-              .filter(rec => rec.category === category)
-              .map((rec, i) => (
-                <Text key={`r-${category}-${i}`} color="#E6E8EA">{`→ ${rec.text}  (${rec.evaluator})`}</Text>
-              ))}
+            {improvements(shown, category).map((tip, i) => (
+              <Text key={`r-${category}-${i}`} color="#E6E8EA">{`• ${tip}`}</Text>
+            ))}
           </Box>
         ))}
+        <Text key="count" color="#84888E">{`${shown.prompts.toLocaleString('es-MX')} prompts analizados · últimos ${shown.days} días de uso`}</Text>
       </Box>
     )
   })

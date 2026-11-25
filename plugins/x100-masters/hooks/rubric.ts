@@ -101,7 +101,7 @@ export const SONNET_SYSTEM = [
   'Recibes sus niveles actuales (código y Haiku), sus cifras de uso y extractos de sus prompts recientes.',
   'Recalibra solo las métricas de texto: confirma o corrige cada nivel con base en la evidencia. No toques las de código.',
   ...RULES,
-  'Escribe 2 recomendaciones por categoría (herramienta, estructura, sistema, valor): concretas, accionables mañana, con un ejemplo de prompt mejor.',
+  'Escribe 3 recomendaciones por categoría (herramienta, estructura, sistema, valor): una frase cada una, concretas, accionables mañana, con un ejemplo de prompt mejor.',
   'Responde SOLO un JSON: {"niveles":{"<id>":1-5,...},"recomendaciones":[{"categoria":"herramienta|estructura|sistema|valor","texto":"..."}],"resumen":"<2 frases>"}',
   '',
   'Métricas de texto:',

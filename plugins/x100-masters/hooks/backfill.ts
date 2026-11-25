@@ -1,0 +1,118 @@
+// The first-run sweep: reads the person's local Claude transcripts of the last 15 days and rebuilds the
+// daily counters the live hooks would have kept. Pure: the caller feeds it lines, file by file.
+import { dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, AUTOMATION_SKILLS, AUTOMATION_TOOLS } from './score'
+import type { Usage } from './score'
+
+export const SWEEP_DAYS = 15
+const SAMPLE = 40
+
+export type Sweep = {
+  since: number
+  usage: Usage
+  times: Record<string, number[]>
+  sessions: Set<string>
+  messages: Set<string>
+  samples: Record<string, string[]>
+}
+
+export const newSweep = (now: number): Sweep => ({ since: now - SWEEP_DAYS * 86_400_000, usage: {}, times: {}, sessions: new Set(), messages: new Set(), samples: {} })
+
+const day = (sweep: Sweep, ms: number) => {
+  const key = dayKey(ms)
+  sweep.usage[key] ??= emptyDay(ms)
+  return sweep.usage[key]
+}
+
+const textOf = (content: unknown): string | undefined => {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return undefined
+  if (content.some(block => (block as { type?: string }).type === 'tool_result')) return undefined
+  return content
+    .filter(block => (block as { type?: string }).type === 'text')
+    .map(block => String((block as { text?: unknown }).text ?? ''))
+    .join('\n')
+}
+
+// One transcript line. Cheap string checks first: most lines are tool output or request blobs.
+export const scanLine = (sweep: Sweep, line: string) => {
+  if (line.length > 3_000_000) return
+  const isUser = line.includes('"type":"user"')
+  const isAssistant = line.includes('"type":"assistant"')
+  if (!isUser && !isAssistant) return
+  let entry: Record<string, unknown>
+  try {
+    entry = JSON.parse(line) as Record<string, unknown>
+  } catch {
+    return
+  }
+  if (entry.isSidechain === true) return
+  const ms = Date.parse(String(entry.timestamp ?? ''))
+  if (!Number.isFinite(ms) || ms < sweep.since) return
+  const message = (entry.message ?? {}) as Record<string, unknown>
+
+  if (entry.type === 'user') {
+    const text = textOf(message.content)
+    if (text === undefined) return
+    if (text.startsWith('[Request interrupted by user')) {
+      day(sweep, ms).steer += 1
+      return
+    }
+    const origin = entry.origin as { kind?: string } | null | undefined
+    if (origin?.kind !== 'human' || entry.isMeta === true) return
+    const counters = day(sweep, ms)
+    const key = dayKey(ms)
+    counters.prompts += 1
+    ;(sweep.times[key] ??= []).push(ms)
+    const session = `${key}|${String(entry.sessionId ?? '')}`
+    if (!sweep.sessions.has(session)) {
+      sweep.sessions.add(session)
+      counters.sessions += 1
+    }
+    if (mentionsFile(text)) counters.files += 1
+    if (mentionsPlan(text)) counters.plans += 1
+    if (entry.entrypoint === 'claude-desktop') counters.desktop += 1
+    if (text.trimStart().startsWith('/') || text.includes('<command-name>')) counters.commands = (counters.commands ?? 0) + 1
+    const sample = (sweep.samples[key] ??= [])
+    if (sample.length < SAMPLE) sample.push(text.slice(0, 1_500))
+    return
+  }
+
+  const counters = day(sweep, ms)
+  const id = String(message.id ?? '')
+  const usage = message.usage as Record<string, number> | undefined
+  if (usage !== undefined && id !== '' && !sweep.messages.has(id)) {
+    sweep.messages.add(id)
+    counters.tokens += (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0)
+  }
+  if (!Array.isArray(message.content)) return
+  for (const block of message.content as Record<string, unknown>[]) {
+    if (block.type !== 'tool_use') continue
+    const name = String(block.name ?? '')
+    const input = (block.input ?? {}) as Record<string, unknown>
+    const key = name.startsWith('mcp__') ? `mcp:${name.split('__')[1] ?? ''}` : name
+    counters.tools[key] = (counters.tools[key] ?? 0) + 1
+    if (name === 'EnterPlanMode') counters.plans += 1
+    if (AUTOMATION_TOOLS.has(key) || (name === 'Skill' && AUTOMATION_SKILLS.has(String(input.skill ?? '')))) counters.auto = (counters.auto ?? 0) + 1
+    if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name) && isSystemFile(String(input.file_path ?? input.notebook_path ?? ''))) counters.build = (counters.build ?? 0) + 1
+  }
+}
+
+// Turns the prompt times into first, last, gaps and quick replies, the way the live hook counts them.
+export const finishSweep = (sweep: Sweep): Usage => {
+  for (const [key, list] of Object.entries(sweep.times)) {
+    const counters = sweep.usage[key]
+    if (counters === undefined) continue
+    const sorted = [...list].sort((a, b) => a - b)
+    counters.first = sorted[0] ?? counters.first
+    counters.last = sorted[sorted.length - 1] ?? counters.last
+    counters.gaps = Math.max(0, sorted.length - 1)
+    counters.quick = sorted.slice(1).filter((ms, i) => ms - (sorted[i] ?? ms) < 10 * 60_000).length
+  }
+  return Object.fromEntries(Object.entries(sweep.usage).filter(([, counters]) => counters.prompts > 0))
+}
+
+// Up to 10 prompts of a day, spread across it, for the day's reading.
+export const pickPrompts = (sample: readonly string[], count = 10) => {
+  if (sample.length <= count) return [...sample]
+  return Array.from({ length: count }, (_, i) => sample[Math.floor((i * sample.length) / count)] ?? '')
+}

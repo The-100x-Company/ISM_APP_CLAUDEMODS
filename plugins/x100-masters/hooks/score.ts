@@ -99,41 +99,88 @@ export const totals = (usage: Usage) => {
 export const mergeLevel = (prev: TextLevel | undefined, level: number, evaluator: Evaluator, model: string, at: string): TextLevel =>
   evaluator === 'haiku' && prev !== undefined ? { level: prev.level * 0.7 + level * 0.3, evaluator, model, at } : { level, evaluator, model, at }
 
-const toPercent = (levels: number[]) => (levels.length === 0 ? null : Math.round(((levels.reduce((a, b) => a + b, 0) / levels.length - 1) / 4) * 100))
+// Each day's readings of the text metrics: Haiku windows add up, Sonnet's daily reading wins.
+export type DayReading = { sum: number; n: number; sonnet?: number }
+export type DayText = Record<string, Record<string, DayReading>>
 
+export const addReading = (days: DayText, key: string, levels: Record<string, unknown>, isSonnet: boolean) => {
+  const today = (days[key] ??= {})
+  for (const metric of TEXT_METRICS) {
+    const level = Number(levels[metric.id])
+    if (!Number.isFinite(level) || level < 1 || level > 5) continue
+    const reading = (today[metric.id] ??= { sum: 0, n: 0 })
+    if (isSonnet) reading.sonnet = level
+    else {
+      reading.sum += level
+      reading.n += 1
+    }
+  }
+  // Only the last 30 days are kept.
+  for (const old of Object.keys(days).sort().slice(0, -30)) delete days[old]
+}
+
+const readingOf = (reading: DayReading | undefined) => (reading === undefined ? undefined : (reading.sonnet ?? (reading.n > 0 ? reading.sum / reading.n : undefined)))
+
+export const AVERAGE_DAYS = 10
+const DAY = 86_400_000
+const round1 = (n: number) => Math.round(n * 10) / 10
+const mean = (list: number[]) => (list.length === 0 ? null : list.reduce((a, b) => a + b, 0) / list.length)
+const toPercent = (levels: number[]) => {
+  const avg = mean(levels)
+  return avg === null ? null : Math.round(((avg - 1) / 4) * 100)
+}
+
+// The usage a given day saw: its own trailing 30 days.
+const upTo = (usage: Usage, key: string) => {
+  const from = dayKey(Date.parse(`${key}T12:00:00Z`) - 30 * DAY)
+  return Object.fromEntries(Object.entries(usage).filter(([day]) => day <= key && day >= from))
+}
+
+// Each active day's level of every metric: code from that day's trailing usage, text from that day's readings.
+const dailyLevels = (usage: Usage, dayText: DayText, days: string[]) =>
+  days.map(key => {
+    const values = codeValues(upTo(usage, key))
+    const levels: Record<string, number | undefined> = {}
+    for (const metric of CODE_METRICS) levels[metric.id] = levelOf(values[metric.id] ?? 0, metric.cuts)
+    for (const metric of TEXT_METRICS) levels[metric.id] = readingOf(dayText[key]?.[metric.id])
+    return levels
+  })
+
+// The profile shown and sent: every metric averaged over the last 10 days of use.
 export const buildProfile = (
   email: string,
   usage: Usage,
+  dayText: DayText,
   text: Record<string, TextLevel>,
   recommendations: Recommendation[],
   summary: string,
   now: number,
 ): MastersProfile => {
   const at = new Date(now).toISOString()
-  const values = codeValues(usage)
-  const hasUse = (values.adopcion ?? 0) > 0
+  const kept = prune(usage, now)
+  const active = Object.keys(kept).filter(key => (kept[key]?.prompts ?? 0) > 0).sort().slice(-AVERAGE_DAYS)
+  const daily = dailyLevels(kept, dayText, active)
+  const values = codeValues(kept)
+  const averaged = (id: string) => mean(daily.map(levels => levels[id]).filter((level): level is number => level !== undefined))
   const metrics: MetricResult[] = [
-    ...CODE_METRICS.map(metric => ({
-      id: metric.id,
-      category: metric.category,
-      level: hasUse ? levelOf(values[metric.id] ?? 0, metric.cuts) : null,
-      value: Math.round((values[metric.id] ?? 0) * 100) / 100,
-      evaluator: 'codigo' as const,
-      model: 'reglas-v1',
-      at,
-    })),
+    ...CODE_METRICS.map(metric => {
+      const level = averaged(metric.id)
+      return { id: metric.id, category: metric.category, level: level === null ? null : round1(level), value: Math.round((values[metric.id] ?? 0) * 100) / 100, evaluator: 'codigo' as const, model: 'reglas-v3', at }
+    }),
     ...TEXT_METRICS.map(metric => {
       const found = text[metric.id]
-
-      return { id: metric.id, category: metric.category, level: found === undefined ? null : Math.round(found.level), evaluator: found?.evaluator ?? 'haiku', model: found?.model ?? '', at: found?.at ?? at }
+      const level = averaged(metric.id) ?? found?.level ?? null
+      return { id: metric.id, category: metric.category, level: level === null ? null : round1(level), evaluator: found?.evaluator ?? 'haiku', model: found?.model ?? 'haiku', at: found?.at ?? at }
     }),
   ]
-  const categories = Object.fromEntries(
-    CATEGORIES.map(category => [category, toPercent(metrics.filter(metric => metric.category === category && metric.level !== null).map(metric => metric.level as number))]),
-  ) as Record<Category, number | null>
+  const levelsOf = (category: Category, pick: (id: string) => number | null | undefined) =>
+    ALL_METRICS.filter(metric => metric.category === category).map(metric => pick(metric.id)).filter((level): level is number => typeof level === 'number')
+  const categories = Object.fromEntries(CATEGORIES.map(category => [category, toPercent(levelsOf(category, id => metrics.find(metric => metric.id === id)?.level))])) as Record<Category, number | null>
+  const trend = Object.fromEntries(CATEGORIES.map(category => [category, daily.map(levels => toPercent(levelsOf(category, id => levels[id])))])) as Record<Category, (number | null)[]>
   const scored = CATEGORIES.filter(category => categories[category] !== null)
   const weight = scored.reduce((total, category) => total + WEIGHTS[category], 0)
   const score = weight === 0 ? 0 : Math.round(scored.reduce((total, category) => total + WEIGHTS[category] * (categories[category] as number), 0) / weight)
+  const used = active.reduce((total, key) => total + (kept[key]?.prompts ?? 0), 0)
 
   return {
     email,
@@ -143,7 +190,9 @@ export const buildProfile = (
     metrics,
     recommendations,
     summary,
-    prompts: totals(usage).prompts,
+    prompts: used,
+    days: active.length,
+    trend,
     updatedAt: at,
   }
 }

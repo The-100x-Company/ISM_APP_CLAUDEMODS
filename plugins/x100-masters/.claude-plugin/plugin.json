@@ -1,6 +1,6 @@
 {
   "name": "x100-masters",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Tu Nivel en Claude by The 100x Co: scores how well each person uses Claude (tool use, structure, systems, business value) on 37 metrics and sends the scores, never the prompts.",
   "author": { "name": "The 100x Company", "url": "https://www.the100xco.com/" },
   "types": "./types/index.d.ts"

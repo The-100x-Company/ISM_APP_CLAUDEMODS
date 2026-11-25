@@ -10,7 +10,11 @@ export type MastersProfile = {
   metrics: MetricResult[]
   recommendations: Recommendation[]
   summary: string
+  // Prompts and active days behind the averages (the last 10 days of use).
   prompts: number
+  days: number
+  // Each category's score on each of those days, oldest first.
+  trend: Record<Category, (number | null)[]>
   updatedAt: string
 }
 declare module 'claude-code' { interface PluginState { 'x100-masters': { profile: MastersProfile | null } } }
