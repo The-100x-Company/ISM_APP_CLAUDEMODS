@@ -13,7 +13,7 @@ import { BYLINE, TITLE, improvements, report, spider, webIcon } from './visuals'
 // Sonnet does the full evaluation once a day. What is shown and sent is the average of the last 10 days of use.
 
 const PANE = 'x100-masters'
-const VERSION = '0.3.0'
+const VERSION = '0.3.1'
 const SWEEP = 'v1'
 const WINDOW = 10
 const DOMAINS = ['ismomotors.com', 'grupoislo.com']
@@ -35,11 +35,29 @@ const load = async <T,>($: EngineInterface, key: string, fallback: T): Promise<T
 let surface = ''
 let isSweeping = false
 
+// ISMO's Claude Team organization: only its members send.
+const ORGANIZATION = '19d986ca-5e90-44dc-a434-7c0d2a0f6c76'
+
+// On Team the organization's guard denies `session.identity` to a mod, so the account Claude Code
+// signed in with is read from ~/.claude.json (oauthAccount) when the engine does not answer.
 const identity = async ($: EngineInterface) => {
   const who = await $.session.identity().catch(() => undefined)
-  const email = who?.email ?? ''
+  let email = who?.email ?? ''
+  let organizationId = who?.organizationId ?? ''
+  if (email === '' || organizationId === '') {
+    const home = homeOf($.plugin.root)
+    const raw = await $.fs.read(`${home}${separatorOf(home)}.claude.json`).catch(() => '')
+    try {
+      const account = (JSON.parse(typeof raw === 'string' ? raw : '{}') as { oauthAccount?: { emailAddress?: string; organizationUuid?: string } }).oauthAccount
+      email ||= account?.emailAddress ?? ''
+      organizationId ||= account?.organizationUuid ?? ''
+    } catch {
+      // No readable account: nothing is sent.
+    }
+  }
+  email = email.toLowerCase()
 
-  return { email, organizationId: who?.organizationId ?? '', isAllowed: who?.isVerified === true && DOMAINS.includes(email.split('@')[1] ?? '') }
+  return { email, organizationId, isAllowed: organizationId === ORGANIZATION && DOMAINS.includes(email.split('@')[1] ?? '') }
 }
 
 const refresh = async ($: EngineInterface) => {

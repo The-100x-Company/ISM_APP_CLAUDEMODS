@@ -1,0 +1,3 @@
+-- Applied 2026-11-25: only ISMO's Team organization (19d986ca-5e90-44dc-a434-7c0d2a0f6c76) may send, except 'prueba'.
+-- Full function body: see 0001; the added line is:
+--   if paquete->>'disparador' <> 'prueba' and paquete->>'organizacion' is distinct from '19d986ca-5e90-44dc-a434-7c0d2a0f6c76' then raise exception 'organizacion no permitida'; end if;
