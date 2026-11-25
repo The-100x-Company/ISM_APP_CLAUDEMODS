@@ -88,16 +88,16 @@ type Section = { label: string; text: string; tone: string }
 
 // One hover card as an SVG group: a title, then labelled sections, wrapped to the card's width.
 const card = (id: string, x: number, y: number, w: number, title: string, sections: Section[]) => {
-  const width = Math.floor((w - 28) / 6.6)
+  const width = Math.floor((w - 32) / 7.3)
   let at = y + 30
-  const parts: string[] = [`<text x="${x + 14}" y="${at}" font-size="14" font-weight="600" fill="${INK}" font-family="${SANS}">${esc(title)}</text>`]
+  const parts: string[] = [`<text x="${x + 14}" y="${at}" font-size="16" font-weight="600" fill="${INK}" font-family="${SANS}">${esc(title)}</text>`]
   at += 8
   for (const section of sections) {
-    at += 18
-    parts.push(`<text x="${x + 14}" y="${at}" font-size="9.5" letter-spacing=".08em" fill="${INK_3}" font-family="${SANS}">${esc(section.label.toUpperCase())}</text>`)
+    at += 22
+    parts.push(`<text x="${x + 14}" y="${at}" font-size="10.5" letter-spacing=".08em" fill="${INK_3}" font-family="${SANS}">${esc(section.label.toUpperCase())}</text>`)
     for (const line of wrap(section.text, width)) {
-      at += 15
-      parts.push(`<text x="${x + 14}" y="${at}" font-size="11.5" fill="${section.tone}" font-family="${SANS}">${esc(line)}</text>`)
+      at += 18
+      parts.push(`<text x="${x + 14}" y="${at}" font-size="13.5" fill="${section.tone}" font-family="${SANS}">${esc(line)}</text>`)
     }
   }
   const h = at - y + 16
@@ -156,7 +156,7 @@ export const spider = (profile: MastersProfile, category: Category, width = 600)
       return `<g class="ax" id="${category}-ax-${i}"><line x1="${cx}" y1="${cy}" x2="${f(vx)}" y2="${f(vy)}" stroke="transparent" stroke-width="14"/><rect x="${f(hx)}" y="${f(y - 11)}" width="${textW}" height="20" fill="transparent"/><text class="lbl" x="${f(x)}" y="${f(y + 4)}" text-anchor="${anchor}" font-size="12.5" fill="${tone}" font-family="${SANS}">${esc(name)}<tspan fill="${INK_3}" font-family="${MONO}" font-size="11"> ${metric.level === null ? '–' : metric.level.toFixed(1)}</tspan></text></g>`
     })
     .join('')
-  const cardW = 340
+  const cardW = 400
   const cardX = cx - cardW / 2
   const tips = metrics
     .map((metric, i) => {
@@ -168,7 +168,7 @@ export const spider = (profile: MastersProfile, category: Category, width = 600)
         ...(next === undefined ? [] : [{ label: 'Cómo subir', text: next, tone: WARM }]),
         ...(guide === undefined ? [] : [{ label: 'Buena práctica', text: guide.practice, tone: INK }, { label: 'Ejemplo', text: guide.example, tone: ACCENT }]),
       ]
-      return card(`${category}-tip-${i}`, cardX, 78, cardW, `${about?.name ?? metric.id} · ${metric.level === null ? 'sin datos' : `${metric.level.toFixed(1)} de 5`}`, sections)
+      return card(`${category}-tip-${i}`, cardX, 70, cardW, `${about?.name ?? metric.id} · ${metric.level === null ? 'sin datos' : `${metric.level.toFixed(1)} de 5`}`, sections)
     })
     .join('')
   const listing = metrics

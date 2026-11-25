@@ -54,6 +54,10 @@ export const mentionsPlan = (text: string) => PLAN.test(text)
 export const codeValues = (usage: Usage): Record<string, number> => {
   const days = Object.values(usage).filter(day => day.prompts > 0)
   const active = days.length
+  const keys = Object.keys(usage).sort()
+  const first = keys[0]
+  const last = keys[keys.length - 1]
+  const span = first === undefined || last === undefined ? 0 : Math.min(30, Math.max(15, Math.round((Date.parse(`${last}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 86_400_000) + 1))
   const sum = (pick: (day: Day) => number) => days.reduce((total, day) => total + pick(day), 0)
   const tools: Record<string, number> = {}
   for (const day of days) for (const [name, count] of Object.entries(day.tools)) tools[name] = (tools[name] ?? 0) + count
@@ -64,7 +68,8 @@ export const codeValues = (usage: Usage): Record<string, number> => {
   const per = (value: number, base: number) => (base > 0 ? value / base : 0)
 
   return {
-    adopcion: active,
+    // Days of use scaled to 30 when less history exists (a first sweep sees 15 days; never fewer than 15 assumed).
+    adopcion: span > 0 ? Math.min(30, (active * 30) / span) : 0,
     frecuencia: per(sum(day => day.quick), gaps),
     jornada: per(sum(day => (day.last - day.first) / 3_600_000), active),
     sesiones: per(sessions, active),
@@ -161,7 +166,12 @@ export const buildProfile = (
   const active = Object.keys(kept).filter(key => (kept[key]?.prompts ?? 0) > 0).sort().slice(-AVERAGE_DAYS)
   const daily = dailyLevels(kept, dayText, active)
   const values = codeValues(kept)
-  const averaged = (id: string) => mean(daily.map(levels => levels[id]).filter((level): level is number => level !== undefined))
+  // Adoption is a count of days, so it is judged on the whole period, not day by day.
+  const adoption = CODE_METRICS.find(metric => metric.id === 'adopcion')
+  const averaged = (id: string) =>
+    id === 'adopcion' && adoption !== undefined && active.length > 0
+      ? levelOf(values.adopcion ?? 0, adoption.cuts)
+      : mean(daily.map(levels => levels[id]).filter((level): level is number => level !== undefined))
   const metrics: MetricResult[] = [
     ...CODE_METRICS.map(metric => {
       const level = averaged(metric.id)
