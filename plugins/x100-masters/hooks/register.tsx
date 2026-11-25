@@ -87,7 +87,8 @@ const send = async ($: EngineInterface, trigger: 'ventana' | 'diaria' | 'cierre'
   for (const queued of outbox) {
     const sent = await $.http
       .fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json', apikey: PUBLISHABLE_KEY }, body: JSON.stringify({ paquete: queued }) })
-      .then(response => response.ok)
+      // A refusal (4xx: old schema, foreign domain) is final; only network or server failures stay queued.
+      .then(response => response.ok || (response.status >= 400 && response.status < 500))
       .catch(() => false)
     if (!sent) left.push(queued)
   }

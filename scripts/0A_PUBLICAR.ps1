@@ -22,5 +22,5 @@ gh release create $tag "dist\$Mod-$version.zip" --repo $repo --title $tag --note
 
 # 4. JSON al portapapeles y panel de la organizacion abierto.
 Get-Content 'deploy\managed-settings.ism-mods.json' -Raw | Set-Clipboard
-Start-Process 'https://claude.ai/admin-settings/claude-code'
-Write-Host "Listo: $tag publicado. El JSON esta en el portapapeles: pegalo en Managed settings y guarda."
+Start-Process 'https://claude.ai/admin-settings'
+Write-Host "Listo: $tag publicado. El JSON esta en el portapapeles: en claude.ai: Organization settings > Claude Code > Managed settings, pegalo (fusionado con lo que haya) y guarda."
