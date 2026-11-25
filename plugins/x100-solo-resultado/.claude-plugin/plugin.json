@@ -1,0 +1,7 @@
+{
+  "name": "x100-solo-resultado",
+  "version": "0.1.0",
+  "description": "Result-only thread: Claude answers in four titled parts and the thread hides the steps, leaving the prompts, a one-line work status and each turn's final reply.",
+  "author": { "name": "The 100x Company" },
+  "types": "./types/index.d.ts"
+}

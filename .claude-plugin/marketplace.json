@@ -1,0 +1,25 @@
+{
+  "name": "ism-mods",
+  "owner": {
+    "name": "The 100x Company",
+    "url": "https://www.the100xco.com/"
+  },
+  "description": "Claude Code mods for ISMO Motors, maintained by The 100x Company.",
+  "plugins": [
+    {
+      "name": "x100-org-badge",
+      "source": "./plugins/x100-org-badge",
+      "description": "Shows the ISMO label above the prompt and among the mode labels."
+    },
+    {
+      "name": "x100-solo-resultado",
+      "source": "./plugins/x100-solo-resultado",
+      "description": "Result-only thread: four-part replies and the steps hidden from the thread."
+    },
+    {
+      "name": "x100-masters",
+      "source": "./plugins/x100-masters",
+      "description": "Tu Nivel en Claude by The 100x Co: 37 metrics, spider charts and recommendations; sends scores, never prompts."
+    }
+  ]
+}

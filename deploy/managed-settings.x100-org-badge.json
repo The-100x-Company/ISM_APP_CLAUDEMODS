@@ -1,0 +1,27 @@
+{
+  "extraKnownMarketplaces": {
+    "ism-mods": {
+      "source": {
+        "source": "settings",
+        "name": "ism-mods",
+        "owner": {
+          "name": "The 100x Company"
+        },
+        "plugins": [
+          {
+            "name": "x100-org-badge",
+            "version": "0.1.0",
+            "source": {
+              "source": "archive",
+              "url": "https://github.com/The-100x-Company/ISM_APP_CLAUDEMODS/releases/download/x100-org-badge-v0.1.0/x100-org-badge-0.1.0.zip",
+              "sha256": "28b1bdbb741bbfea97edd4a0a610f60ad655fcaf17df222d8f40fa115a99bb7d"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "enabledPlugins": {
+    "x100-org-badge@ism-mods": true
+  }
+}

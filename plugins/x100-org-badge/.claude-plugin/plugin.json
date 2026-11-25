@@ -1,0 +1,6 @@
+{
+  "name": "x100-org-badge",
+  "version": "0.1.0",
+  "description": "Shows the organization label (ISMO) among the mode labels beside the prompt, on the terminal and the desktop app.",
+  "author": { "name": "The 100x Company" }
+}
