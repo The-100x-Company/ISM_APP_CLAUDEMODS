@@ -13,7 +13,7 @@ import { BYLINE, TITLE, improvements, report, spider, webIcon } from './visuals'
 // Sonnet does the full evaluation once a day. What is shown and sent is the average of the last 10 days of use.
 
 const PANE = 'x100-masters'
-const VERSION = '0.3.1'
+const VERSION = '0.3.2'
 const SWEEP = 'v1'
 const WINDOW = 10
 const DOMAINS = ['ismomotors.com', 'grupoislo.com']
@@ -350,8 +350,9 @@ export const register: Register = on => {
         {inner}
         <Box key="masters" flexDirection="row" alignItems="center" gap={1}>
           {Svg ? <Svg key="masters-web" source={webIcon(14)} alt={TITLE} width={14} height={14} /> : null}
-          <Button key="masters-open" plain label={TITLE} onPress={() => openPane($)}>
-            <Text color="#84888E" hover={{ color: '#E6E8EA' }}>{shown === null ? 'Tu nivel' : `Tu nivel ${shown.score}`}</Text>
+          {/* The name is the link: it opens the web portal; /masters still opens the panel. */}
+          <Button key="masters-open" plain label={`${TITLE}: abrir el portal`} onPress={() => openReport($)}>
+            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{shown === null ? `${TITLE} ↗` : `${TITLE} · ${shown.score} ↗`}</Text>
           </Button>
         </Box>
       </Box>
