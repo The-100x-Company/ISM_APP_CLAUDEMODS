@@ -13,7 +13,7 @@ import { BYLINE, TITLE, improvements, report, spider, webIcon } from './visuals'
 // Sonnet does the full evaluation once a day. What is shown and sent is the average of the last 10 days of use.
 
 const PANE = 'x100-masters'
-const VERSION = '0.3.2'
+const VERSION = '0.3.3'
 const SWEEP = 'v1'
 const WINDOW = 10
 const DOMAINS = ['ismomotors.com', 'grupoislo.com']
@@ -192,6 +192,13 @@ const separatorOf = (home: string) => (/^[A-Za-z]:/.test(home) ? '\\' : '/')
 // Haiku, then send. Runs once per person and machine, in the background.
 const sweep = async ($: EngineInterface) => {
   if (isSweeping || (await load<string>($, 'barrido', '')) === SWEEP) return
+  // Every open session runs its own copy of the mod, but they share the store: the first one takes the
+  // lock and the rest skip. A lock older than 30 minutes belongs to a session that died mid-sweep.
+  const lock = await load<number>($, 'barridoEnCurso', 0)
+  if (Date.now() - lock < 30 * 60_000) return
+  const mine = Date.now() + Math.random()
+  await $.store.set('barridoEnCurso', mine)
+  if ((await load<number>($, 'barridoEnCurso', 0)) !== mine) return
   isSweeping = true
   try {
     const now = Date.now()
@@ -228,6 +235,7 @@ const sweep = async ($: EngineInterface) => {
     await send($, 'barrido')
   } finally {
     isSweeping = false
+    await $.store.set('barridoEnCurso', 0)
   }
 }
 
