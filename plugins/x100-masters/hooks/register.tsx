@@ -20,7 +20,7 @@ import type { TalentStore } from './talent-score'
 // and tool, Haiku reads each 10-prompt window and Sonnet does the full evaluation once a day.
 
 const PANE = 'x100-masters'
-const VERSION = '0.5.3'
+const VERSION = '0.5.4'
 // The band speaks in first person; the portal keeps «Tu Claude Score».
 const BAND_TITLE = 'Mi Claude Score'
 const SWEEP = 'v3'
@@ -447,15 +447,44 @@ const openPane = async ($: EngineInterface) => {
 }
 
 // The portal: a self-contained HTML page written next to the person's Claude settings and opened in the browser.
+// A managed mod may be refused a write under ~/.claude, so the page tries the plugin's own folder and the home
+// folder after it; each refusal is kept and shown, never swallowed.
+const reason = (x: unknown) => (x instanceof Error ? x.message : String(x)).slice(0, 140)
+
 const openReport = async ($: EngineInterface) => {
-  const built = await refresh($)
-  const home = homeOf($.plugin.root)
-  const sep = separatorOf(home)
-  const path = `${home}${sep}.claude${sep}tu-claude-score.html`
-  const talent = talentProfile(await load<TalentStore>($, 'talento', emptyTalent()))
-  await $.fs.write(path, report(built, await fetchTeam($).catch(() => null), talent))
-  const argv = sep === '\\' ? ['explorer.exe', path] : [/^\/Users\//.test(home) ? 'open' : 'xdg-open', path]
-  await $.process.run(argv).catch(() => undefined)
+  const failed: string[] = []
+  try {
+    const built = await refresh($)
+    const home = homeOf($.plugin.root)
+    const sep = separatorOf(home)
+    const talent = talentProfile(await load<TalentStore>($, 'talento', emptyTalent()))
+    const html = report(built, await fetchTeam($).catch(() => null), talent)
+    const places = [`${home}${sep}.claude${sep}tu-claude-score.html`, `${$.plugin.root}${sep}tu-claude-score.html`, `${home}${sep}mi-claude-score.html`]
+    let path: string | null = null
+    for (const place of places) {
+      try {
+        await $.fs.write(place, html)
+        path = place
+        break
+      } catch (x) {
+        failed.push(`escribir: ${reason(x)}`)
+      }
+    }
+    if (path === null) throw new Error(failed.join(' · '))
+    const openers = sep === '\\' ? [['explorer.exe', path], ['cmd.exe', '/c', 'start', '', path]] : [[/^\/Users\//.test(home) ? 'open' : 'xdg-open', path]]
+    for (const argv of openers) {
+      try {
+        await $.process.run(argv)
+
+        return
+      } catch (x) {
+        failed.push(`abrir: ${reason(x)}`)
+      }
+    }
+    $.ui.toast(`Mi Claude Score: el portal está en ${path}, ábrelo desde ahí (${failed.join(' · ')})`)
+  } catch (x) {
+    $.ui.toast(`Mi Claude Score no pudo abrir el portal: ${reason(x)}`)
+  }
 }
 
 export const register: Register = on => {
