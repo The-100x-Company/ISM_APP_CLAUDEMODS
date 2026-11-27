@@ -1,6 +1,6 @@
 {
   "name": "x100-masters",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Tu Claude Score by The 100x Co: scores how well each person uses Claude (tool use, structure, systems, business value) on 40 metrics and sends the scores, never the prompts nor the email.",
   "author": { "name": "The 100x Company", "url": "https://www.the100xco.com/" },
   "types": "./types/index.d.ts"

@@ -5,7 +5,7 @@ import type { MastersProfile, Team } from '../types'
 import type { Usage } from './score'
 import { dayKey } from './score'
 
-export type Nudge = { icon: string; text: string }
+export type Nudge = { icon: string; text: string; tip?: boolean }
 export type ScoreLog = Record<string, { real: number; actual: number }>
 
 const level = (profile: MastersProfile, id: string) => profile.metrics.find(metric => metric.id === id)?.level ?? null

@@ -52,5 +52,6 @@ export type Team = {
   categorias: Record<Category, { media: number | null; master: string | null; master_nivel?: number | null }>
 }
 // The band's nudge: a celebration or one thing to try.
-export type BandNudge = { icon: string; text: string }
+// tip: a piece of advice (shown as «Tip: …»); otherwise a celebration with its icon.
+export type BandNudge = { icon: string; text: string; tip?: boolean }
 declare module 'claude-code' { interface PluginState { 'x100-masters': { profile: MastersProfile | null; nudge: BandNudge | null } } }

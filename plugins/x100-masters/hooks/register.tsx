@@ -20,7 +20,9 @@ import type { TalentStore } from './talent-score'
 // and tool, Haiku reads each 10-prompt window and Sonnet does the full evaluation once a day.
 
 const PANE = 'x100-masters'
-const VERSION = '0.5.1'
+const VERSION = '0.5.2'
+// The band speaks in first person; the portal keeps «Tu Claude Score».
+const BAND_TITLE = 'Mi Claude Score'
 const SWEEP = 'v3'
 const WINDOW = 10
 const DAY = 86_400_000
@@ -166,7 +168,7 @@ const refreshNudge = async ($: EngineInterface, built: MastersProfile, usage: Us
   const lastRank = before === undefined ? null : (ranks[before] ?? null)
   const sonnet = await load<{ day: string; items: Nudge[] }>($, 'empujones', { day: '', items: [] })
   const tips = sonnet.day >= dayKey(now - DAY) && sonnet.items.length > 0 ? sonnet.items : ruleTips(built)
-  const chosen = pickNudge([...celebrations(built, usage, log, team, lastRank, now), ...tips], usage[key]?.prompts ?? 0)
+  const chosen = pickNudge([...celebrations(built, usage, log, team, lastRank, now), ...tips.map(item => ({ ...item, tip: true }))], usage[key]?.prompts ?? 0)
   await update($, nudge, () => chosen)
   // Today's score and place, for tomorrow's celebrations (two weeks kept).
   const keep = (record: Record<string, unknown>) => Object.keys(record).sort().slice(0, -14).forEach(day => delete record[day])
@@ -541,12 +543,12 @@ export const register: Register = on => {
         <Box key="masters" flexDirection="row" alignItems="center" gap={1}>
           {Svg ? <Svg key="masters-web" source={webIcon(20)} alt={TITLE} width={20} height={20} /> : null}
           {/* The name is the link: it opens the web portal; /masters still opens the panel. */}
-          <Button key="masters-open" plain label={`${TITLE}: abrir el portal`} onPress={() => openReport($)}>
-            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{`↗ ${TITLE}${score}`}</Text>
+          <Button key="masters-open" plain label={`${BAND_TITLE}: abrir el portal`} onPress={() => openReport($)}>
+            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{`↗ ${BAND_TITLE}${score}`}</Text>
           </Button>
           {hint === null ? null : (
             <Button key="masters-nudge" plain label={hint.text} onPress={() => openReport($)}>
-              <Text color="#E9D25B" hover={{ color: '#E6E8EA' }}>{`${hint.icon} ${hint.text}`}</Text>
+              <Text color="#E9D25B" hover={{ color: '#E6E8EA' }}>{hint.tip === true ? `Tip: ${hint.text}` : `${hint.icon} ${hint.text}`}</Text>
             </Button>
           )}
         </Box>
