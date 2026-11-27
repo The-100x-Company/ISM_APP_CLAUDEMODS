@@ -20,7 +20,7 @@ import type { TalentStore } from './talent-score'
 // and tool, Haiku reads each 10-prompt window and Sonnet does the full evaluation once a day.
 
 const PANE = 'x100-masters'
-const VERSION = '0.5.0'
+const VERSION = '0.5.1'
 const SWEEP = 'v3'
 const WINDOW = 10
 const DAY = 86_400_000
