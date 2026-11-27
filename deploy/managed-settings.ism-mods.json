@@ -10,11 +10,11 @@
         "plugins": [
           {
             "name": "x100-masters",
-            "version": "0.4.0",
+            "version": "0.5.0",
             "source": {
               "source": "archive",
-              "url": "https://github.com/The-100x-Company/ISM_APP_CLAUDEMODS/releases/download/x100-masters-v0.4.0/x100-masters-0.4.0.zip",
-              "sha256": "9daf39a5aa03a7ac9bfb965f50aa232d9eb16b75ec02b3e24890dcaa7e4a0cb4"
+              "url": "https://github.com/The-100x-Company/ISM_APP_CLAUDEMODS/releases/download/x100-masters-v0.5.0/x100-masters-0.5.0.zip",
+              "sha256": "de7b230aac7f18307bd67c490c5c9a992369bc821c02fc1e32a37555417316e5"
             }
           }
         ]

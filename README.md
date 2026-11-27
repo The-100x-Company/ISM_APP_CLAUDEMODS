@@ -9,7 +9,7 @@ ni claude.ai.**
 | Mod | Que hace |
 |---|---|
 | `x100-org-badge` | Muestra `ISMO` en la banda sobre el prompt (`AbovePrompt`) y entre las etiquetas de modo (`SessionMode`) |
-| `x100-masters` | Tu Nivel en Claude by The 100x Co: 37 metricas en 4 categorias, arañas y recomendaciones; envia puntajes a Supabase (`x100_masters`), nunca prompts. `/masters` abre el panel |
+| `x100-masters` | Tu Claude Score by The 100x Co: 40 métricas en 4 categorías, Spiderweb Charts, nivel real por máximo recurrente, radiografía de talento local y empujones diarios; envía puntajes a Supabase (`x100_masters`), nunca prompts ni correos (solo su hash). Multiempresa: ver `docs/0C_INSTALAR_X100_MASTERS_OTRA_EMPRESA.md`. `/masters` abre el panel |
 | `x100-solo-resultado` | Respuestas en cuatro partes (PASOS EJECUTADOS, RESULTADOS, ALERTAS, TUS PRÓXIMAS ACCIONES) y el hilo sin pasos. No toca `claude -p` ni el SDK. `/solo-resultado` lo apaga por sesión |
 
 ## Limite conocido

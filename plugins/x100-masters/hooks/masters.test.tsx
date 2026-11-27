@@ -26,5 +26,5 @@ test('/masters builds the profile and opens the panel', async ($, on) => {
   on('ui.open', () => ({ value: { isPlaced: true } }))
 
   const ran = await $.command.run({ command: 'masters', args: '' } as Parameters<typeof $.command.run>[0])
-  expect(ran.text ?? '').toMatch(/Tu Nivel en Claude/)
+  expect(ran.text ?? '').toMatch(/Tu Claude Score/)
 })

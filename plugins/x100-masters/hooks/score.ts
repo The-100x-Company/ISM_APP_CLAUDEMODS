@@ -1,5 +1,5 @@
 // Pure scoring: daily usage counters → code metrics, text levels → profile. No engine calls here.
-import { ALL_METRICS, CATEGORIES, CODE_METRICS, TEXT_METRICS, TIERS, WEIGHTS, levelOf } from './rubric'
+import { ALL_METRICS, CATEGORIES, CODE_METRICS, TEXT_METRICS, TIERS, WEIGHTS, codeLevel, levelOf } from './rubric'
 import type { Category, Evaluator, MastersProfile, MetricResult, Potential, Recommendation } from '../types'
 
 export type Day = {
@@ -19,6 +19,12 @@ export type Day = {
   commands?: number
   auto?: number
   build?: number
+  // Added in 0.5.0: prompts sent from the phone or the web (Remote Control), artifacts published, cloud launches.
+  mobile?: number
+  artifacts?: number
+  cloud?: number
+  // Added in 0.6.0: writes to Claude's memory (memory/*.md, MEMORY.md, CLAUDE.md).
+  memory?: number
 }
 export type Usage = Record<string, Day>
 export type TextLevel = { level: number; evaluator: Evaluator; model: string; at: string }
@@ -30,9 +36,10 @@ export const dayKey = (ms: number) => new Date(ms - 6 * 3_600_000).toISOString()
 
 export const emptyDay = (now: number): Day => ({ prompts: 0, first: now, last: now, sessions: 0, gaps: 0, quick: 0, tools: {}, tokens: 0, files: 0, plans: 0, steer: 0, desktop: 0, commands: 0, auto: 0, build: 0 })
 
-// Only the last 30 days are kept and scored.
-export const prune = (usage: Usage, now: number): Usage => {
-  const from = dayKey(now - 30 * DAY_MS)
+// 45 days are kept: the «momento actual» reads the last 30, the «nivel real» the last 45.
+export const KEEP_DAYS = 45
+export const prune = (usage: Usage, now: number, days: number = KEEP_DAYS): Usage => {
+  const from = dayKey(now - days * DAY_MS)
 
   return Object.fromEntries(Object.entries(usage).filter(([key]) => key >= from))
 }
@@ -41,6 +48,11 @@ const FILE = /@[\w./\\-]+|[A-Za-z]:\\[^\s]+|(?:^|\s)[\w-]+\/[\w./-]+\.\w{1,5}\b|
 // Files that make up a person's system: skills, rules, instructions, hooks, mods and settings.
 const SYSTEM_FILE = /(SKILL\.md|CLAUDE\.md|AGENTS\.md|[\\/]\.claude[\\/](skills|rules|commands|agents|hooks|dev-mods|workflows)[\\/]|settings(\.local)?\.json|plugin\.json|hooks\.json)/i
 export const isSystemFile = (path: string) => SYSTEM_FILE.test(path)
+// Memory files: <anything>/memory/<name>.md, MEMORY.md and CLAUDE.md.
+export const MEMORY_FILE = /[\\/]memory[\\/][^\\/]+\.md$|(^|[\\/])(CLAUDE|MEMORY)\.md$/i
+export const MEMORY_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
+// A tool call that saves something into memory.
+export const isMemoryWrite = (name: string, input: Record<string, unknown>) => MEMORY_TOOLS.has(name) && MEMORY_FILE.test(String(input.file_path ?? ''))
 // Tools that keep work running on its own: loops, schedules, monitors and triggers.
 export const AUTOMATION_TOOLS = new Set(['CronCreate', 'ScheduleWakeup', 'Monitor', 'RemoteTrigger', 'mcp:scheduled-tasks'])
 export const AUTOMATION_SKILLS = new Set(['loop', 'schedule'])
@@ -90,6 +102,10 @@ export const codeValues = (usage: Usage): Record<string, number> => {
     automatizacion: per(sum(day => day.auto ?? 0), active),
     comandos: per(sum(day => day.commands ?? 0), prompts),
     construccion: per(sum(day => day.build ?? 0), active),
+    movil: per(days.filter(day => (day.mobile ?? 0) > 0).length, active),
+    artefactos: per(sum(day => day.artifacts ?? 0), active),
+    nube: per(sum(day => day.cloud ?? 0), active),
+    memoria: per(sum(day => day.memory ?? 0), active),
   }
 }
 
@@ -124,8 +140,8 @@ export const addReading = (days: DayText, key: string, levels: Record<string, un
       reading.n += 1
     }
   }
-  // Only the last 30 days are kept.
-  for (const old of Object.keys(days).sort().slice(0, -30)) delete days[old]
+  // Only the last 45 days are kept.
+  for (const old of Object.keys(days).sort().slice(0, -KEEP_DAYS)) delete days[old]
 }
 
 const readingOf = (reading: DayReading | undefined) => (reading === undefined ? undefined : (reading.sonnet ?? (reading.n > 0 ? reading.sum / reading.n : undefined)))
@@ -134,9 +150,15 @@ export const AVERAGE_DAYS = 10
 const DAY = 86_400_000
 const round1 = (n: number) => Math.round(n * 10) / 10
 const mean = (list: number[]) => (list.length === 0 ? null : list.reduce((a, b) => a + b, 0) / list.length)
-const toPercent = (levels: number[]) => {
+// 0.5.0 (Tomás 2026-11-26): scores read a little acid, never optimistic. The 1-5 average maps to 0-100 through
+// x·(1+x)/2: what used to read 80 now reads 72, 54 reads 42, 30 reads 20, and 100 is still 100. Levels 1-5 stay.
+export const acid = (share: number) => {
+  const x = Math.max(0, Math.min(1, share))
+  return (x * (1 + x)) / 2
+}
+export const toPercent = (levels: number[]) => {
   const avg = mean(levels)
-  return avg === null ? null : Math.round(((avg - 1) / 4) * 100)
+  return avg === null ? null : Math.round(acid((avg - 1) / 4) * 100)
 }
 
 // The usage a given day saw: its own trailing 30 days.
@@ -150,7 +172,7 @@ const dailyLevels = (usage: Usage, dayText: DayText, days: string[]) =>
   days.map(key => {
     const values = codeValues(upTo(usage, key))
     const levels: Record<string, number | undefined> = {}
-    for (const metric of CODE_METRICS) levels[metric.id] = levelOf(values[metric.id] ?? 0, metric.cuts)
+    for (const metric of CODE_METRICS) levels[metric.id] = codeLevel(metric, values)
     for (const metric of TEXT_METRICS) levels[metric.id] = readingOf(dayText[key]?.[metric.id])
     return levels
   })
@@ -164,9 +186,10 @@ export const buildProfile = (
   recommendations: Recommendation[],
   summary: string,
   now: number,
+  memory: RealMemory = {},
 ): MastersProfile => {
   const at = new Date(now).toISOString()
-  const kept = prune(usage, now)
+  const kept = prune(usage, now, 30)
   const active = Object.keys(kept).filter(key => (kept[key]?.prompts ?? 0) > 0).sort().slice(-AVERAGE_DAYS)
   const daily = dailyLevels(kept, dayText, active)
   const values = codeValues(kept)
@@ -194,9 +217,10 @@ export const buildProfile = (
   const scored = CATEGORIES.filter(category => categories[category] !== null)
   const weight = scored.reduce((total, category) => total + WEIGHTS[category], 0)
   const score = weight === 0 ? 0 : Math.round(scored.reduce((total, category) => total + WEIGHTS[category] * (categories[category] as number), 0) / weight)
-  const real = potentialLevels(kept, dayText, now, Object.fromEntries(metrics.map(metric => [metric.id, metric.level])))
+  const real = potentialLevels(usage, dayText, now, Object.fromEntries(metrics.map(metric => [metric.id, metric.level])), memory)
   for (const metric of metrics) metric.potential = real.levels[metric.id] ?? null
-  const potential: Potential | null = real.days === 0 ? null : { score: real.score, tier: real.tier, categories: real.categories, confidence: real.confidence }
+  const potential: Potential | null = real.days === 0 && Object.keys(memory).length === 0 ? null : { score: real.score, tier: real.tier, categories: real.categories, confidence: real.confidence, crack: real.crack, recurrent: real.recurrent }
+  const realToday = real.today
   const used = active.reduce((total, key) => total + (kept[key]?.prompts ?? 0), 0)
 
   return {
@@ -211,6 +235,7 @@ export const buildProfile = (
     days: active.length,
     trend,
     potential,
+    realToday,
     updatedAt: at,
   }
 }
@@ -230,16 +255,17 @@ export const parseJson = (text: string): Record<string, unknown> | undefined => 
 }
 
 // ── Nivel real ────────────────────────────────────────────────────────────────────────────────────────
-// The level a person has shown on their good working days of the last 30, next to the «momento actual»
-// (the plain average of the last 10 active days). Light days never count against it; one great day never makes it.
+// «Máximo recurrente» (0.5.0, regla de Tomás 2026-11-26): the highest level a person reached at least 4 times
+// in the last 45 days, with 2 of those times inside 10 consecutive days. Once reached it is remembered for
+// 120 days, so vacations or light weeks never pull it down. Light days (few prompts or tokens) never count.
 export const REAL = {
   minPrompts: 8, // a day with fewer prompts is a light day
   minTokens: 50_000, // …and so is one under the first «consumo» cut
-  rampFrom: 2, // days of evidence that still prove nothing
-  rampTo: 6, // days of evidence for full confidence
-  topCode: 0.5, // counted metrics: the better half of the days
-  topText: 0.3, // read metrics: the best three in ten days
-  minTop: 3, // never fewer than three days in the top
+  window: 45, // days read
+  times: 4, // times the level must be reached
+  within: 10, // two of them inside this many consecutive days
+  memory: 120, // days a reached level is remembered
+  fullDays: 8, // substantive days for full confidence
   crackScore: 80,
   crackConfidence: 0.75,
 } as const
@@ -249,58 +275,105 @@ const PERIOD_METRICS = new Set(['adopcion', 'variedad'])
 
 export const isSubstantive = (day: Day | undefined): day is Day => day !== undefined && day.prompts >= REAL.minPrompts && day.tokens >= REAL.minTokens
 
-// The Potential of types/index.d.ts (score, tier, categories, confidence) plus what the spider and the audit need.
+// Each day's recurrent maximum, per metric, for the 120-day memory (kept in the store as `realMemory`).
+export type RealMemory = Record<string, Record<string, number>>
+
+// The Potential of types/index.d.ts plus what the spider, the memory and the audit need.
 export type PotentialLevels = Potential & {
   // Level 1-5 per metric, never under the current one; null when nothing was ever seen. Goes to MetricResult.potential.
   levels: Record<string, number | null>
+  // Today's recurrent maximum per metric (only the metrics that qualified): written into the memory.
+  today: Record<string, number>
   // Substantive days with evidence behind each metric.
   evidence: Record<string, number>
   // Substantive days in the window.
   days: number
-  crack: boolean
 }
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
-const sureOf = (days: number) => clamp01((days - REAL.rampFrom) / (REAL.rampTo - REAL.rampFrom))
+const noonOf = (key: string) => Date.parse(`${key}T12:00:00Z`)
+
+// The highest level reached on `times` days, two of them less than `within` days apart; null when none qualifies.
+export const recurrentMax = (seen: readonly { key: string; level: number }[], times: number = REAL.times, within: number = REAL.within): number | null => {
+  const candidates = [...new Set(seen.map(item => item.level))].sort((a, b) => b - a)
+  for (const level of candidates) {
+    const days = seen.filter(item => item.level >= level).map(item => noonOf(item.key)).sort((a, b) => a - b)
+    if (days.length < times) continue
+    if (days.some((ms, i) => i > 0 && ms - (days[i - 1] ?? ms) < within * DAY)) return level
+  }
+  return null
+}
+
+// The memory's best level per metric over the last 120 days.
+export const remembered = (memory: RealMemory, now: number): Record<string, number> => {
+  const from = dayKey(now - REAL.memory * DAY)
+  const best: Record<string, number> = {}
+  for (const [key, levels] of Object.entries(memory)) {
+    if (key < from) continue
+    for (const [id, level] of Object.entries(levels)) best[id] = Math.max(best[id] ?? 0, level)
+  }
+  return best
+}
+
+// Adds today's recurrent maxima to the memory and drops what is older than 120 days.
+export const remember = (memory: RealMemory, now: number, today: Record<string, number>): RealMemory => {
+  const from = dayKey(now - REAL.memory * DAY)
+  const kept: RealMemory = Object.fromEntries(Object.entries(memory).filter(([key]) => key >= from))
+  const key = dayKey(now)
+  const day = { ...(kept[key] ?? {}) }
+  for (const [id, level] of Object.entries(today)) day[id] = Math.max(day[id] ?? 0, level)
+  if (Object.keys(day).length > 0) kept[key] = day
+  return kept
+}
 
 // `current` is the level of each metric in the «momento actual» web (profile.metrics), so the real web never falls inside it.
-export const potentialLevels = (usage: Usage, dayText: DayText, now: number, current: Record<string, number | null | undefined> = {}): PotentialLevels => {
-  const kept = prune(usage, now)
+export const potentialLevels = (
+  usage: Usage,
+  dayText: DayText,
+  now: number,
+  current: Record<string, number | null | undefined> = {},
+  memory: RealMemory = {},
+): PotentialLevels => {
+  const kept = prune(usage, now, REAL.window)
   const keys = Object.keys(kept).filter(key => isSubstantive(kept[key])).sort()
-  const period = codeValues(kept)
+  const period = codeValues(prune(usage, now, 30))
+  const best = remembered(memory, now)
   // Each substantive day on its own: code from that day's counters alone, text from that day's readings.
   const perDay = keys.map(key => {
     const values = codeValues({ [key]: kept[key] as Day })
     const levels: Record<string, number | undefined> = {}
-    for (const metric of CODE_METRICS) if (!PERIOD_METRICS.has(metric.id)) levels[metric.id] = levelOf(values[metric.id] ?? 0, metric.cuts)
+    for (const metric of CODE_METRICS) if (!PERIOD_METRICS.has(metric.id)) levels[metric.id] = codeLevel(metric, values)
     for (const metric of TEXT_METRICS) levels[metric.id] = readingOf(dayText[key]?.[metric.id])
-    return levels
+    return { key, levels }
   })
   const levels: Record<string, number | null> = {}
+  const today: Record<string, number> = {}
   const evidence: Record<string, number> = {}
-  const trust: number[] = []
+  let recurrent = 0
 
   for (const metric of ALL_METRICS) {
     const shown = current[metric.id] ?? null
     if (PERIOD_METRICS.has(metric.id)) {
       const cuts = CODE_METRICS.find(item => item.id === metric.id)?.cuts ?? []
       const whole = Object.keys(kept).length === 0 ? null : levelOf(period[metric.id] ?? 0, cuts)
-      levels[metric.id] = whole === null ? shown : round1(Math.max(whole, shown ?? 1))
+      if (whole !== null && keys.length >= REAL.times) today[metric.id] = whole
+      const real = Math.max(whole ?? 0, best[metric.id] ?? 0, shown ?? 0)
+      levels[metric.id] = real === 0 ? null : round1(real)
       evidence[metric.id] = keys.length
-      trust.push(sureOf(keys.length))
       continue
     }
-    const seen = perDay
-      .map(day => day[metric.id])
-      .filter((level): level is number => level !== undefined)
-      .sort((a, b) => b - a)
-    const share = metric.evaluator === 'codigo' ? REAL.topCode : REAL.topText
-    const top = mean(seen.slice(0, Math.max(REAL.minTop, Math.ceil(seen.length * share))))
-    const base = shown ?? mean(seen)
-    const sure = sureOf(seen.length)
+    const seen = perDay.flatMap(day => {
+      const level = day.levels[metric.id]
+      return level === undefined ? [] : [{ key: day.key, level }]
+    })
+    const top = recurrentMax(seen)
+    if (top !== null) {
+      today[metric.id] = top
+      recurrent += 1
+    }
     evidence[metric.id] = seen.length
-    trust.push(sure)
-    levels[metric.id] = base === null || top === null ? base : round1(base + sure * Math.max(0, top - base))
+    const real = Math.max(top ?? 0, best[metric.id] ?? 0, shown ?? 0)
+    levels[metric.id] = real === 0 ? null : round1(real)
   }
 
   const inCategory = (category: Category) =>
@@ -311,10 +384,11 @@ export const potentialLevels = (usage: Usage, dayText: DayText, now: number, cur
   const scored = CATEGORIES.filter(category => categories[category] !== null)
   const weight = scored.reduce((total, category) => total + WEIGHTS[category], 0)
   const score = weight === 0 ? 0 : Math.round(scored.reduce((total, category) => total + WEIGHTS[category] * (categories[category] as number), 0) / weight)
-  const confidence = Math.round((mean(trust) ?? 0) * 100) / 100
+  const confidence = Math.round(clamp01(keys.length / REAL.fullDays) * 100) / 100
 
   return {
     levels,
+    today,
     evidence,
     confidence,
     days: keys.length,
@@ -322,5 +396,6 @@ export const potentialLevels = (usage: Usage, dayText: DayText, now: number, cur
     score,
     tier: TIERS[Math.min(4, Math.floor(score / 20))] ?? 'Inicial',
     crack: score >= REAL.crackScore && confidence >= REAL.crackConfidence,
+    recurrent,
   }
 }

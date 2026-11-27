@@ -1,10 +1,23 @@
-// The first-run sweep: reads the person's local Claude transcripts of the last 15 days and rebuilds the
+// The first-run sweep: reads the person's local Claude transcripts of the last 45 days and rebuilds the
 // daily counters the live hooks would have kept. Pure: the caller feeds it lines, file by file.
-import { dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, SPEC_TOOLS, isSpecFile, AUTOMATION_SKILLS, AUTOMATION_TOOLS } from './score'
+import { dayKey, emptyDay, isMemoryWrite, isSystemFile, mentionsFile, mentionsPlan, SPEC_TOOLS, isSpecFile, AUTOMATION_SKILLS, AUTOMATION_TOOLS } from './score'
 import type { Usage } from './score'
 
-export const SWEEP_DAYS = 15
+export const SWEEP_DAYS = 45
 const SAMPLE = 40
+
+// One prompt and its moment: the talent X-ray weighs prompts outside working hours more.
+export type Sample = { at: number; text: string }
+
+// An artifact published or pinned as an app.
+export const isArtifactPublish = (name: string, input: Record<string, unknown>) =>
+  name === 'Artifact' && (input.action === undefined || input.action === 'publish' || input.action === 'pin') && (input.asset !== true)
+// Work sent to run in the cloud: cloud sessions, routines and remote triggers.
+export const isCloudLaunch = (name: string, input: Record<string, unknown>) =>
+  name === 'RemoteTrigger' ||
+  name === 'mcp__ccd_session__move_to_cloud' ||
+  (name === 'mcp__ccd_session__start_session' && input.target === 'cloud') ||
+  (name === 'Skill' && input.skill === 'schedule')
 
 export type Sweep = {
   since: number
@@ -12,7 +25,7 @@ export type Sweep = {
   times: Record<string, number[]>
   sessions: Set<string>
   messages: Set<string>
-  samples: Record<string, string[]>
+  samples: Record<string, Sample[]>
 }
 
 export const newSweep = (now: number): Sweep => ({ since: now - SWEEP_DAYS * 86_400_000, usage: {}, times: {}, sessions: new Set(), messages: new Set(), samples: {} })
@@ -73,7 +86,7 @@ export const scanLine = (sweep: Sweep, line: string) => {
     if (entry.entrypoint === 'claude-desktop') counters.desktop += 1
     if (text.trimStart().startsWith('/') || text.includes('<command-name>')) counters.commands = (counters.commands ?? 0) + 1
     const sample = (sweep.samples[key] ??= [])
-    if (sample.length < SAMPLE) sample.push(text.slice(0, 1_500))
+    if (sample.length < SAMPLE) sample.push({ at: ms, text: text.slice(0, 1_500) })
     return
   }
 
@@ -94,6 +107,9 @@ export const scanLine = (sweep: Sweep, line: string) => {
     if (SPEC_TOOLS.has(name) || (['Write', 'Edit'].includes(name) && isSpecFile(String(input.file_path ?? '')))) counters.plans += 1
     if (AUTOMATION_TOOLS.has(key) || (name === 'Skill' && AUTOMATION_SKILLS.has(String(input.skill ?? '')))) counters.auto = (counters.auto ?? 0) + 1
     if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name) && isSystemFile(String(input.file_path ?? input.notebook_path ?? ''))) counters.build = (counters.build ?? 0) + 1
+    if (isArtifactPublish(name, input)) counters.artifacts = (counters.artifacts ?? 0) + 1
+    if (isCloudLaunch(name, input)) counters.cloud = (counters.cloud ?? 0) + 1
+    if (isMemoryWrite(name, input)) counters.memory = (counters.memory ?? 0) + 1
   }
 }
 
@@ -112,7 +128,7 @@ export const finishSweep = (sweep: Sweep): Usage => {
 }
 
 // Up to 10 prompts of a day, spread across it, for the day's reading.
-export const pickPrompts = (sample: readonly string[], count = 10) => {
+export const pickPrompts = (sample: readonly Sample[], count = 10): Sample[] => {
   if (sample.length <= count) return [...sample]
-  return Array.from({ length: count }, (_, i) => sample[Math.floor((i * sample.length) / count)] ?? '')
+  return Array.from({ length: count }, (_, i) => sample[Math.floor((i * sample.length) / count)] ?? { at: 0, text: '' })
 }

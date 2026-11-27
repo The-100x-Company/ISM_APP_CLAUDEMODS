@@ -1,29 +1,39 @@
 // What the hover shows for each dimension: what we observe, four ways to do it and four prompts to paste.
-// Plain es-MX for people who are new to Claude; only real controls of the desktop app (Code tab), checked
-// against code.claude.com/docs on 2026-11-26. No levels, ratios or internal detail here.
+// Plain es-MX for people who are new to Claude; only real controls of Claude Code and the desktop app (Code tab),
+// checked against code.claude.com/docs on 2026-11-27 (desktop, remote-control, artifacts, routines, memory, goal,
+// scheduled-tasks). No levels, ratios or internal detail here.
+// Every bullet belongs to the category of its metric (rubric.ts): herramienta = product features; estructura = how
+// the request is planned and specified; sistema = memory, skills, commands, loops, automation; valor = business value.
+// Not confirmed in the docs:
+// [?] frecuencia: typing the next message while Claude is still working (queued messages) in the desktop app.
+// [?] profundidad: /compact inside the desktop app (documented for the CLI).
+// [?] artefactos: pinning is done by asking Claude (Artifact tool, claude.ai sidebar); no pin button is documented.
+// [?] nube: starting a cloud session by asking in chat; the documented ways are the «Cloud» environment, «Open in» >
+//     «Cloud» and /schedule. Cloud sessions work on a GitHub repository.
+// [?] automatizacion: «Programadas (Scheduled)» and «Run now» come from the 2026-11-26 check; not re-read today.
 export const GUIDE: Record<string, { measure: string; how: string[]; examples: string[] }> = {
   adopcion: {
     measure: 'Usas Claude la mayoría de tus días de trabajo.',
     how: [
-      'Abre Claude al empezar tu día, junto con tu correo.',
-      'Llévale primero la tarea que más tiempo te quita.',
-      'Deja la app abierta toda la jornada.',
-      'Elige una tarea que repites cada semana y hazla siempre con Claude.',
+      'Abre la app de Claude al empezar tu día, junto con tu correo.',
+      'Ancla la app a tu barra de tareas para tenerla a un clic.',
+      'Conecta tu correo y tu calendario; así Claude te sirve desde el primer mensaje.',
+      'Programa una tarea diaria: Claude trabaja para ti aunque tú no lo abras.',
     ],
     examples: [
-      'Estos son mis pendientes de hoy en ventas: [lista]. Ordénalos por impacto y dime por cuál empiezo.',
-      'Revisa mi agenda de hoy y prepárame un resumen de cada cita con cliente.',
-      'Ayúdame a contestar estos 5 correos de clientes de postventa. Te los pego abajo.',
-      'Hoy cierro la cobranza de la semana. Dime qué necesito tener listo antes de las 5 pm.',
+      'Revisa mi correo de hoy y dime qué clientes de postventa esperan respuesta.',
+      'Cada día hábil a las 8, déjame la lista de citas de servicio de hoy sin confirmar.',
+      'Lee el archivo de pendientes de ventas que te adjunto y ármame la lista de hoy.',
+      'Revisa mi calendario de hoy y dime qué juntas tengo con clientes.',
     ],
   },
   frecuencia: {
     measure: 'Trabajas con Claude en conversación seguida: pides, revisas y ajustas.',
     how: [
-      'Pide un primer borrador y corrígelo en el siguiente mensaje.',
-      'Contesta en el momento, mientras el tema está fresco.',
-      'Haz varios mensajes cortos en lugar de uno gigante.',
-      'Si Claude te pregunta algo, respóndele antes de cambiar de tarea.',
+      'Contesta en la misma sesión, mientras el tema está fresco.',
+      'Manda mensajes cortos y seguidos en lugar de uno gigante.',
+      'Si Claude te pregunta algo o te pide un permiso, respóndele antes de cambiar de tarea.',
+      'Escribe tu siguiente mensaje aunque Claude siga trabajando; lo toma en cuanto puede.',
     ],
     examples: [
       'Va el primer borrador del mensaje al cliente. Hazlo más corto y con tono más cálido.',
@@ -33,57 +43,42 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
     ],
   },
   jornada: {
-    measure: 'Tienes Claude en uso a lo largo de tu jornada, no solo un rato.',
+    measure: 'Tienes Claude en uso a lo largo de tu jornada y abres una sesión para cada tarea.',
     how: [
-      'Usa Claude en la mañana para planear y en la tarde para cerrar.',
-      'Regresa a la misma conversación cuando retomes el tema.',
-      'Antes de hacer a mano una tarea repetida, prueba hacerla con Claude.',
-      'Cierra tu día pidiendo un resumen de lo que quedó pendiente.',
+      'Deja la app abierta de la mañana al cierre, no solo un rato.',
+      'Usa «+ New» en la barra lateral (Ctrl+N) para abrir una sesión por cada tarea.',
+      'Ponle a cada sesión un nombre que reconozcas después.',
+      'Cuando retomes un tema, regresa a su sesión desde la barra lateral.',
     ],
     examples: [
-      'Buenos días. Estas son mis 6 tareas de hoy en cobranza. Ármame el orden del día.',
-      'Regreso de la junta. Estas son mis notas. Sácame los acuerdos y quién hace cada uno.',
-      'Antes de irme: resume qué quedó pendiente hoy y qué debo retomar mañana primero.',
-      'Tengo 20 minutos libres. ¿Qué avanzo de la lista que armamos en la mañana?',
-    ],
-  },
-  sesiones: {
-    measure: 'Abres una conversación nueva para cada tema distinto.',
-    how: [
-      'Usa «+ New» en la barra lateral (Ctrl+N) cuando cambies de tema.',
-      'Ponle a cada conversación un nombre que reconozcas después.',
-      'No mezcles la cotización de un cliente con el reporte de otro.',
-      'Si Claude se confunde con lo anterior, empieza una conversación limpia.',
-    ],
-    examples: [
-      'Tema nuevo: reporte semanal de citas de servicio de la sucursal Centro. Te paso el archivo.',
-      'Esta conversación es solo para la campaña de seminuevos de diciembre.',
-      'Empiezo de cero: necesito el comparativo de comisiones de noviembre contra octubre.',
-      'Nueva tarea de RH: descripción del puesto de asesor de servicio.',
+      'Sesión nueva: reporte semanal de citas de servicio de la sucursal Centro. Te adjunto el archivo.',
+      'Esta sesión es solo para la campaña de seminuevos de diciembre.',
+      'Regreso de la junta y sigo aquí con la cobranza. Te adjunto mis notas.',
+      'Antes de irme: deja en un archivo qué quedó pendiente en esta sesión para retomarlo mañana.',
     ],
   },
   profundidad: {
-    measure: 'Llevas cada tema hasta terminarlo dentro de la misma conversación.',
+    measure: 'Llevas cada tema hasta terminarlo dentro de la misma sesión.',
     how: [
-      'Sigue en la misma conversación hasta tener el resultado que vas a usar.',
-      'Pide la versión final en el formato en que la vas a entregar.',
-      'Después del borrador, pide revisar cifras, tono y formato por separado.',
-      'Antes de cerrar, pregunta qué falta para darlo por terminado.',
+      'Sigue en la misma sesión hasta tener el resultado que vas a usar.',
+      'Pide ahí mismo el archivo final: Excel, PDF o presentación.',
+      'Retoma la sesión desde la barra lateral en lugar de abrir otra para el mismo tema.',
+      'Si la sesión ya es muy larga, escribe /compact: Claude la resume y sigues ahí.',
     ],
     examples: [
-      'Ya tengo el borrador. Ahora revisa que los totales por sucursal cuadren con el archivo.',
-      'Conviértelo en una tabla de una página para el director comercial.',
-      '¿Qué le falta a este reporte para poder enviarlo hoy?',
-      'Último paso: escribe el correo de 3 líneas con el que lo voy a enviar.',
+      'Sigo con el mismo reporte. Ahora agrega la hoja de la sucursal Norte.',
+      'Conviértelo en un Excel de una hoja para el director comercial.',
+      'Retomo lo de ayer en esta sesión: faltan las cifras de postventa. Te adjunto el archivo.',
+      'Último paso aquí mismo: guarda el PDF final en la carpeta Reportes.',
     ],
   },
   consumo: {
     measure: 'Le das a Claude trabajo grande y real: archivos, datos y procesos completos.',
     how: [
       'Adjunta el archivo completo con el botón + en lugar de copiar un pedazo.',
-      'Pide el análisis de todo el mes, no de un solo día.',
-      'Dale varios documentos juntos y pide que los cruce.',
-      'Encárgale el proceso completo, de los datos al entregable.',
+      'Elige la carpeta de trabajo para que Claude lea todos sus archivos.',
+      'Adjunta varios documentos en el mismo mensaje.',
+      'Para trabajo pesado, elige un modelo más capaz en el selector de modelo.',
     ],
     examples: [
       'Lee estos 3 Excel de ventas y dime qué sucursal vende menos y por qué.',
@@ -97,8 +92,8 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
     how: [
       'Pide que lea tus archivos y carpetas en vez de pegarle el texto.',
       'Pide que busque en internet cuando necesites datos actuales.',
-      'Pide el resultado como archivo: Excel, PDF o presentación.',
-      'Pide que revise una página web y te diga qué encontró.',
+      'Pide el resultado como archivo (Excel, PDF, presentación) o como artefacto.',
+      'Pide que abra una página web en el panel Navegador (Browser) y la revise.',
     ],
     examples: [
       'Busca en la carpeta Contratos los que vencen este mes y hazme la lista en Excel.',
@@ -187,7 +182,7 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
     how: [
       'Abre la app de escritorio en lugar del navegador.',
       'Trabaja en la pestaña Code con la carpeta de tus archivos elegida.',
-      'Deja la app anclada en tu barra de tareas.',
+      'Abre los paneles Archivos (Files) y Navegador (Browser) para ver el resultado sin salir de la app.',
       'Usa el botón + para adjuntar archivos de tu computadora.',
     ],
     examples: [
@@ -195,6 +190,51 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
       'Guarda el resultado como Excel en la misma carpeta, con la fecha de hoy en el nombre.',
       'Revisa todos los PDF de esta carpeta y dime cuáles no tienen firma.',
       'Ordena los archivos de esta carpeta por sucursal y dime cómo quedaron.',
+    ],
+  },
+  movil: {
+    measure: 'Manejas tus sesiones de Claude desde el teléfono o la web con Remote Control.',
+    how: [
+      'Escribe /remote-control en la sesión que quieres seguir fuera de tu escritorio.',
+      'Abre la app de Claude en tu teléfono y toca Code para ver esa sesión.',
+      'O entra a claude.ai/code desde cualquier navegador.',
+      'Para tenerlo siempre, activa «Connect new sessions to Remote Control» en Settings > Claude Code.',
+    ],
+    examples: [
+      '/remote-control',
+      'Te escribo desde el teléfono: ¿ya terminó el cruce de cartera vencida? Dame el total por sucursal.',
+      'Te mando la foto del pizarrón de citas de servicio. Pásala a la tabla de hoy.',
+      'Estoy en piso de ventas. Sigue con el reporte y avísame aquí cuando termine.',
+    ],
+  },
+  artefactos: {
+    measure: 'Publicas tableros, páginas y apps pequeñas como artefactos en claude.ai.',
+    how: [
+      'Pide el resultado «como artefacto» cuando sea más fácil verlo que leerlo.',
+      'Compártelo con el botón Share de la página en lugar de mandar capturas.',
+      'Pide a Claude que lo actualice: el enlace sigue siendo el mismo.',
+      'Encuentra tus artefactos con /artifacts y pide fijar los que consultas seguido.',
+    ],
+    examples: [
+      'Haz un artefacto con el tablero de cartera vencida por sucursal.',
+      'Publica como artefacto la comparación de 3 planes de financiamiento, lado a lado.',
+      'Actualiza el artefacto de ventas con las cifras de hoy y fíjalo.',
+      'Agrega al artefacto un botón para descargar la tabla en CSV.',
+    ],
+  },
+  nube: {
+    measure: 'Mandas trabajo a correr en la nube, sin depender de tu computadora.',
+    how: [
+      'Elige «Cloud» en el selector de entorno, debajo del cuadro de mensaje.',
+      'Escribe /schedule para crear una tarea programada que corre en la nube.',
+      'Pasa una sesión a la nube con «Open in» > «Cloud» antes de apagar tu equipo.',
+      'Revisa el avance en claude.ai/code o en la app de tu teléfono.',
+    ],
+    examples: [
+      '/schedule cada lunes a las 8, revisa la cartera vencida y deja el resumen por sucursal.',
+      '/schedule el día 1 de cada mes, compara las comisiones del mes contra el anterior.',
+      'Corre esto en la nube: revisa las 200 encuestas de servicio y agrupa las quejas por causa.',
+      'Pasa esta sesión a la nube y termina el reporte aunque apague la computadora.',
     ],
   },
   delegacion: {
@@ -217,13 +257,13 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
     how: [
       'Pídelo en el chat: «cada lunes a las 9, haz…».',
       'O abre Programadas (Scheduled) en la barra lateral y crea una tarea nueva.',
-      'Escribe en la tarea qué es un buen resultado y a dónde va.',
+      'Escribe en la tarea cómo se comprueba que quedó bien y dónde deja el resultado.',
       'Corre la primera vez con «Run now» y revisa el resultado.',
     ],
     examples: [
       'Cada lunes a las 8, revisa la cartera vencida y déjame el resumen por sucursal.',
       'Todos los días a las 9, lista las citas de servicio de hoy que no están confirmadas.',
-      'Cada viernes a las 4 pm, arma el reporte de ventas de la semana contra la meta.',
+      'Cada viernes a las 4 pm, actualiza el artefacto de ventas de la semana contra la meta.',
       'El día 1 de cada mes, compara las comisiones del mes contra el anterior y marca diferencias.',
     ],
   },
@@ -255,6 +295,21 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
       'Guarda esta regla: los correos a clientes van de usted y sin tecnicismos.',
       'Crea una skill con los pasos del cierre mensual de cobranza que acabamos de hacer.',
       'Revisa mis instrucciones y dime cuáles ya no hacen falta.',
+    ],
+  },
+  memoria: {
+    measure: 'Guardas en la memoria de Claude los datos, preferencias y decisiones que no quieres repetir.',
+    how: [
+      'Dile «recuerda que…» cuando des un dato que va a servir otra vez.',
+      'Guarda cada decisión con su fecha y su porqué.',
+      'Escribe /memory para ver y corregir lo que Claude tiene guardado.',
+      'Borra lo que ya no aplica: una memoria vieja causa errores.',
+    ],
+    examples: [
+      'Recuerda que el director comercial quiere los reportes en una sola página.',
+      'Guarda en memoria: el corte de cobranza es cada viernes a las 4 pm.',
+      'Guarda esta decisión: desde diciembre de 2026 el enganche mínimo en seminuevos es de 15 %, por política de crédito.',
+      'Enséñame qué tienes en memoria sobre postventa y borra lo que ya no aplica.',
     ],
   },
   objetivo: {
@@ -352,7 +407,7 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
     how: [
       'Pide ver de dónde salió cada cifra.',
       'Pide unas filas de ejemplo que prueben el total.',
-      'Pide que revise su resultado contra tu criterio y te muestre la revisión.',
+      'Pide que revise su resultado contra tu criterio de terminado y te muestre la revisión.',
       'Abre el archivo y revisa tú una muestra.',
     ],
     examples: [
@@ -440,16 +495,16 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
   loops: {
     measure: 'Pides ciclos de hacer, revisar y corregir hasta cumplir una condición.',
     how: [
-      'Da la condición que debe cumplirse para terminar.',
-      'Pide que revise su resultado y corrija lo que falle.',
+      'Da la condición comprobable que debe cumplirse para terminar.',
+      'Usa /goal con esa condición: Claude sigue trabajando hasta cumplirla.',
+      'Usa /loop para repetir una revisión cada cierto tiempo.',
       'Pide que te avise solo cuando se cumpla o cuando se atore.',
-      'Para revisiones que se repiten, crea una tarea programada.',
     ],
     examples: [
-      'Revisa fila por fila y corrige hasta que todas cuadren. Avísame solo si alguna no se puede.',
-      'Compara cada factura contra su orden de servicio y sigue hasta que no haya diferencias.',
+      '/goal todas las facturas de noviembre cuadran con su orden de servicio',
       'Corrige el reporte y vuelve a revisar los totales hasta que coincidan con el sistema.',
-      'Cada hora, revisa si ya llegaron los pagos pendientes y actualiza la lista.',
+      '/loop 30m revisa si ya llegaron los pagos pendientes y actualiza la lista',
+      'Revisa fila por fila y corrige hasta que todas cuadren. Avísame solo si alguna no se puede.',
     ],
   },
   recursividad: {
@@ -488,13 +543,13 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
       'Di el indicador por su nombre, con su valor de hoy.',
       'Di la meta y la fecha.',
       'Relaciona tu indicador con el de la empresa.',
-      'Pide el trabajo en función de ese indicador.',
+      'Pide un artefacto con tus indicadores para consultarlos cada semana.',
     ],
     examples: [
       'Mi indicador es tiempo de respuesta a leads: hoy 6 horas, la meta es 1 hora.',
       'En cobranza medimos cartera vencida a más de 60 días: hoy es 12 %.',
       'En postventa cuidamos la retención de clientes al segundo servicio: vamos en 48 %.',
-      'En RH medimos la rotación de asesores a 90 días. Ayúdame a bajarla.',
+      'En RH medimos la rotación de asesores a 90 días: hoy 22 %. Ponla en un artefacto junto a la meta de 15 %.',
     ],
   },
   metrica_exito: {
@@ -569,7 +624,7 @@ export const GUIDE: Record<string, { measure: string; how: string[]; examples: s
       'Ya pasó un mes. Compara el tiempo de cobro de hoy contra el de antes del cambio.',
       'La campaña cerró con 132 leads; la meta era 150. ¿Qué ajustamos para la siguiente?',
       'Las citas confirmadas subieron de 60 % a 71 %. ¿Seguimos con el guion o lo cambiamos?',
-      'Mide otra vez la rotación a 90 días con los datos de este corte y compárala.',
+      'Programa para el 31 de enero medir otra vez la cartera vencida y compararla con el punto de partida.',
     ],
   },
 }
