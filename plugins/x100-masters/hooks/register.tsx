@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Category, MastersProfile, Recommendation } from '../types'
+import type { Category, MastersProfile, Recommendation, Team } from '../types'
 import { CATEGORIES, CATEGORY_NAMES, HAIKU_SYSTEM, SONNET_SYSTEM, TEXT_METRICS } from './rubric'
-import { AUTOMATION_SKILLS, AUTOMATION_TOOLS, addReading, buildProfile, codeValues, dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, mergeLevel, parseJson, prune, totals } from './score'
+import { AUTOMATION_SKILLS, AUTOMATION_TOOLS, addReading, buildProfile, codeValues, dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, SPEC_TOOLS, isSpecFile, mergeLevel, parseJson, prune, totals } from './score'
 import type { DayText, TextLevel, Usage } from './score'
 import { finishSweep, newSweep, pickPrompts, scanLine } from './backfill'
 import { BYLINE, TITLE, improvements, report, spider, webIcon } from './visuals'
@@ -13,13 +13,15 @@ import { BYLINE, TITLE, improvements, report, spider, webIcon } from './visuals'
 // Sonnet does the full evaluation once a day. What is shown and sent is the average of the last 10 days of use.
 
 const PANE = 'x100-masters'
-const VERSION = '0.3.3'
+const VERSION = '0.4.0'
 const SWEEP = 'v1'
 const WINDOW = 10
 const DOMAINS = ['ismomotors.com', 'grupoislo.com']
 // The one door into Supabase (100x-staging): a checked RPC. The publishable key is public by design;
 // the function, not the key, decides what gets in (schema, group domain, size, rate).
 const ENDPOINT = 'https://oqhqazffrdeegqesukia.supabase.co/rest/v1/rpc/x100_masters_ingest'
+// The group's ranking: answered only for a group account that has already sent its own scores; names, never emails.
+const TEAM_ENDPOINT = 'https://oqhqazffrdeegqesukia.supabase.co/rest/v1/rpc/x100_masters_equipo'
 const PUBLISHABLE_KEY = 'sb_publishable_BBepv64edBJZsgY90-ZZOQ_V0j81N55'
 const PERSON = new Set(['composer', 'bridge'])
 const CHUNK = 4 * 1024 * 1024
@@ -104,7 +106,8 @@ const send = async ($: EngineInterface, trigger: Trigger) => {
     puntaje: built.score,
     nivel: built.tier,
     categorias: built.categories,
-    metricas: built.metrics.map(metric => ({ id: metric.id, categoria: metric.category, nivel: metric.level === null ? null : Math.round(metric.level), valor: metric.value ?? metric.level, evaluador: metric.evaluator, modelo: metric.model, evaluado: metric.at })),
+    metricas: built.metrics.map(metric => ({ id: metric.id, categoria: metric.category, nivel: metric.level === null ? null : Math.round(metric.level), valor: metric.value ?? metric.level, potencial: metric.potential ?? null, evaluador: metric.evaluator, modelo: metric.model, evaluado: metric.at })),
+    potencial: built.potential === null ? null : { puntaje: built.potential.score, nivel: built.potential.tier, categorias: built.potential.categories, confianza: built.potential.confidence },
     recomendaciones: built.recommendations.map(rec => ({ categoria: rec.category, texto: rec.text, evaluador: rec.evaluator, modelo: rec.model, evaluado: rec.at })),
     resumen: built.summary,
     uso: { ...totals(usage), dias_promedio: built.days, prompts_promedio: built.prompts, tendencia: built.trend, valores: codeValues(usage) },
@@ -120,6 +123,20 @@ const send = async ($: EngineInterface, trigger: Trigger) => {
     if (!sent) left.push(queued)
   }
   await $.store.set('outbox', left)
+}
+
+// The group's view for the portal and the panel, cached for an hour; a refusal leaves it empty.
+const fetchTeam = async ($: EngineInterface): Promise<Team | null> => {
+  const who = await identity($)
+  if (!who.isAllowed) return null
+  const cached = await load<{ at: number; team: Team | null }>($, 'team', { at: 0, team: null })
+  if (cached.team !== null && Date.now() - cached.at < 60 * 60_000) return cached.team
+  const team = await $.http
+    .fetch(TEAM_ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json', apikey: PUBLISHABLE_KEY }, body: JSON.stringify({ p_correo: who.email }) })
+    .then(response => (response.ok ? (JSON.parse(response.text) as Team) : null))
+    .catch(() => null)
+  if (team !== null) await $.store.set('team', { at: Date.now(), team })
+  return team ?? cached.team
 }
 
 // Haiku reads 10 prompts against the fixed rubric: specific, cheap, cached prefix.
@@ -265,6 +282,7 @@ const observePrompt = async ($: EngineInterface, text: string) => {
 
 const openPane = async ($: EngineInterface) => {
   await refresh($)
+  void fetchTeam($).catch(() => undefined)
   await $.ui.open({ id: PANE, title: `${TITLE} ${BYLINE}` })
 }
 
@@ -274,7 +292,7 @@ const openReport = async ($: EngineInterface) => {
   const home = homeOf($.plugin.root)
   const sep = separatorOf(home)
   const path = `${home}${sep}.claude${sep}tu-nivel-en-claude.html`
-  await $.fs.write(path, report(built))
+  await $.fs.write(path, report(built, await fetchTeam($).catch(() => null)))
   const argv = sep === '\\' ? ['explorer.exe', path] : [/^\/Users\//.test(home) ? 'open' : 'xdg-open', path]
   await $.process.run(argv).catch(() => undefined)
 }
@@ -315,7 +333,7 @@ export const register: Register = on => {
     const input = ((e as { input?: unknown }).input ?? {}) as Record<string, unknown>
     await touchDay($, day => {
       day.tools[key] = (day.tools[key] ?? 0) + 1
-      if (name === 'EnterPlanMode') day.plans += 1
+      if (SPEC_TOOLS.has(name) || (['Write', 'Edit'].includes(name) && isSpecFile(String(input.file_path ?? '')))) day.plans += 1
       if (AUTOMATION_TOOLS.has(key) || (name === 'Skill' && AUTOMATION_SKILLS.has(String(input.skill ?? '')))) day.auto = (day.auto ?? 0) + 1
       if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name) && isSystemFile(String(input.file_path ?? input.notebook_path ?? ''))) day.build = (day.build ?? 0) + 1
     }).catch(() => undefined)
@@ -360,7 +378,7 @@ export const register: Register = on => {
           {Svg ? <Svg key="masters-web" source={webIcon(14)} alt={TITLE} width={14} height={14} /> : null}
           {/* The name is the link: it opens the web portal; /masters still opens the panel. */}
           <Button key="masters-open" plain label={`${TITLE}: abrir el portal`} onPress={() => openReport($)}>
-            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{shown === null ? `${TITLE} ↗` : `${TITLE} · ${shown.score} ↗`}</Text>
+            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{shown === null ? `${TITLE} ↗` : shown.potential === null ? `${TITLE} · ${shown.score} ↗` : `${TITLE} · ${shown.potential.score} ↗`}</Text>
           </Button>
         </Box>
       </Box>
@@ -373,11 +391,12 @@ export const register: Register = on => {
     const { Box, Button, Text } = elements
     const Svg = 'Svg' in elements ? elements.Svg : undefined
     const shown = (await read($, profile)) ?? (await refresh($))
+    const team = (await load<{ at: number; team: Team | null }>($, 'team', { at: 0, team: null })).team
 
     return (
       <Box flexDirection="column" gap={1} paddingX={1}>
         <Box key="head" flexDirection="row" justifyContent="space-between">
-          <Text bold>{`${TITLE} ${BYLINE} · ${shown.score} · ${shown.tier}`}</Text>
+          <Text bold>{shown.potential === null ? `${TITLE} ${BYLINE} · ${shown.score} · ${shown.tier}` : `${TITLE} ${BYLINE} · real ${shown.potential.score} · hoy ${shown.score}`}</Text>
           <Button key="masters-report" plain label="Abrir el portal" onPress={() => openReport($)}>
             <Text color="#6D92D6">↗</Text>
           </Button>
@@ -385,7 +404,7 @@ export const register: Register = on => {
         {CATEGORIES.map(category => (
           <Box key={`cat-${category}`} flexDirection="column">
             {Svg ? (
-              <Svg source={spider(shown, category, 560)} alt={`${CATEGORY_NAMES[category]}: ${shown.categories[category] ?? 'sin datos'}`} width={560} isInteractive />
+              <Svg source={spider(shown, category, 560, team)} alt={`${CATEGORY_NAMES[category]}: ${shown.categories[category] ?? 'sin datos'}`} width={560} isInteractive />
             ) : (
               <Text bold>{`${CATEGORY_NAMES[category]} · ${shown.categories[category] ?? '—'}`}</Text>
             )}

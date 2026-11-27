@@ -1,6 +1,6 @@
 // The first-run sweep: reads the person's local Claude transcripts of the last 15 days and rebuilds the
 // daily counters the live hooks would have kept. Pure: the caller feeds it lines, file by file.
-import { dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, AUTOMATION_SKILLS, AUTOMATION_TOOLS } from './score'
+import { dayKey, emptyDay, isSystemFile, mentionsFile, mentionsPlan, SPEC_TOOLS, isSpecFile, AUTOMATION_SKILLS, AUTOMATION_TOOLS } from './score'
 import type { Usage } from './score'
 
 export const SWEEP_DAYS = 15
@@ -91,7 +91,7 @@ export const scanLine = (sweep: Sweep, line: string) => {
     const input = (block.input ?? {}) as Record<string, unknown>
     const key = name.startsWith('mcp__') ? `mcp:${name.split('__')[1] ?? ''}` : name
     counters.tools[key] = (counters.tools[key] ?? 0) + 1
-    if (name === 'EnterPlanMode') counters.plans += 1
+    if (SPEC_TOOLS.has(name) || (['Write', 'Edit'].includes(name) && isSpecFile(String(input.file_path ?? '')))) counters.plans += 1
     if (AUTOMATION_TOOLS.has(key) || (name === 'Skill' && AUTOMATION_SKILLS.has(String(input.skill ?? '')))) counters.auto = (counters.auto ?? 0) + 1
     if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name) && isSystemFile(String(input.file_path ?? input.notebook_path ?? ''))) counters.build = (counters.build ?? 0) + 1
   }

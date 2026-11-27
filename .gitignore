@@ -1,3 +1,6 @@
 dist/
 **/.claude-plugin/types/
 **/tsconfig.json
+
+# Team scores with emails: never in this public repo
+tablero/datos.json

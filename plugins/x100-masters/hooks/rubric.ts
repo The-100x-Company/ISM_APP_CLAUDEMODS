@@ -1,4 +1,4 @@
-// The rubric of «Tu Nivel en Claude» (The 100x Co): 37 metrics in four categories, each scored 1 (Inicial) to 5 (Experto).
+// The rubric of «Tu Nivel en Claude» (The 100x Co): 38 metrics in four categories, each scored 1 (Inicial) to 5 (Experto).
 // Code scores what can be counted; Haiku reads each 10-prompt window; Sonnet calibrates once a day.
 import type { Category, Evaluator } from '../types'
 
@@ -17,7 +17,7 @@ export const CATEGORY_NAMES: Record<Category, string> = {
 
 export const CATEGORY_ABOUT: Record<Category, string> = {
   herramienta: 'Cuánto y qué tan a fondo usa Claude: frecuencia, jornada, profundidad y variedad.',
-  estructura: 'Qué tan bien plantea el trabajo: objetivo, contexto, criterios, casos borde y verificación.',
+  estructura: 'Qué tan bien plantea el trabajo: objetivo, contexto, criterios, casos borde, preguntas y verificación.',
   sistema: 'Si convierte lo que hace en sistema: SOPs, comandos, loops, automatizaciones y agentes.',
   valor: 'Si trabaja sobre el valor de la compañía: conoce sus KPIs, mide, analiza retorno y prioriza por impacto.',
 }
@@ -35,11 +35,12 @@ export const CODE_METRICS: readonly (Metric & { cuts: Cuts; unit: string })[] = 
   { id: 'profundidad', category: 'herramienta', name: 'Profundidad', about: 'Prompts por sesión', evaluator: 'codigo', unit: 'prompts/sesión', cuts: [3, 6, 16, 41] },
   { id: 'consumo', category: 'herramienta', name: 'Consumo', about: 'Tokens nuevos por día activo (sin lecturas de caché)', evaluator: 'codigo', unit: 'tokens/día', cuts: [50_000, 250_000, 1_000_000, 5_000_000] },
   { id: 'variedad', category: 'herramienta', name: 'Variedad', about: 'Herramientas distintas que Claude usa por ti', evaluator: 'codigo', unit: 'herramientas', cuts: [3, 6, 10, 15] },
-  { id: 'contexto', category: 'herramienta', name: 'Contexto', about: 'Prompts que señalan archivos o rutas concretas', evaluator: 'codigo', unit: 'proporción', cuts: [0.02, 0.1, 0.25, 0.5] },
-  { id: 'planificacion', category: 'herramienta', name: 'Planificación', about: 'Plan mode, planes o specs antes de construir, por cada 100 prompts', evaluator: 'codigo', unit: 'por 100', cuts: [0.5, 1, 3, 8] },
-  { id: 'skills', category: 'herramienta', name: 'Skills', about: 'Skills usadas por día activo', evaluator: 'codigo', unit: 'por día', cuts: [0.1, 0.5, 2, 5] },
-  { id: 'conectores', category: 'herramienta', name: 'Conectores', about: 'Llamadas a sistemas conectados (MCP) por día activo', evaluator: 'codigo', unit: 'por día', cuts: [1, 2, 10, 50] },
-  { id: 'conduccion', category: 'herramienta', name: 'Conducción', about: 'Interrupciones y correcciones de rumbo por cada 100 prompts', evaluator: 'codigo', unit: 'por 100', cuts: [0.5, 1, 3, 8] },
+  { id: 'contexto', category: 'herramienta', name: 'Contexto', about: 'Prompts que entregan el archivo o la ruta exacta (con @ o adjunto) en vez de describirlo', evaluator: 'codigo', unit: 'proporción', cuts: [0.02, 0.1, 0.25, 0.5] },
+  // Same id as before; since 2026 the official guidance is spec first (interview → written spec → check), with plan mode as one way to do it.
+  { id: 'planificacion', category: 'herramienta', name: 'Especificación', about: 'Veces que acuerda qué se va a hacer antes de construir (spec, plan o entrevista previa), por cada 100 prompts', evaluator: 'codigo', unit: 'por 100', cuts: [0.5, 1, 3, 8] },
+  { id: 'skills', category: 'herramienta', name: 'Skills', about: 'Skills (recetas guardadas) usadas por día activo', evaluator: 'codigo', unit: 'por día', cuts: [0.1, 0.5, 2, 5] },
+  { id: 'conectores', category: 'herramienta', name: 'Conectores', about: 'Llamadas a apps conectadas (conectores MCP) por día activo', evaluator: 'codigo', unit: 'por día', cuts: [1, 2, 10, 50] },
+  { id: 'conduccion', category: 'herramienta', name: 'Conducción', about: 'Veces que detiene a Claude para corregir el rumbo, por cada 100 prompts', evaluator: 'codigo', unit: 'por 100', cuts: [0.5, 1, 3, 8] },
   { id: 'escritorio', category: 'herramienta', name: 'App de escritorio', about: 'Parte del trabajo hecho en la app de escritorio', evaluator: 'codigo', unit: 'proporción', cuts: [0.25, 0.5, 0.75, 0.95] },
   { id: 'delegacion', category: 'sistema', name: 'Delegación', about: 'Subagentes y workflows lanzados por día activo', evaluator: 'codigo', unit: 'por día', cuts: [0.1, 0.5, 2, 8] },
   { id: 'automatizacion', category: 'sistema', name: 'Automatización', about: 'Loops, tareas programadas, monitores y disparadores por día activo', evaluator: 'codigo', unit: 'por día', cuts: [0.05, 0.2, 0.5, 2] },
@@ -51,11 +52,12 @@ export const CODE_METRICS: readonly (Metric & { cuts: Cuts; unit: string })[] = 
 export const TEXT_METRICS: readonly (Metric & { levels: readonly [string, string, string, string, string] })[] = [
   { id: 'objetivo', category: 'estructura', name: 'Objetivo', about: 'Dice qué quiere lograr y para qué', evaluator: 'haiku', levels: ['Orden suelta sin fin', 'Tarea sin propósito', 'Tarea con propósito', 'Propósito y resultado esperado', 'Propósito, resultado y quién lo usa'] },
   { id: 'contexto_negocio', category: 'estructura', name: 'Contexto de negocio', about: 'Da el contexto que Claude no puede adivinar', evaluator: 'haiku', levels: ['Ninguno', 'Una pista', 'Contexto básico', 'Contexto, restricciones y fuentes', 'Todo lo anterior y lo que ya se intentó'] },
-  { id: 'criterios', category: 'estructura', name: 'Criterios de aceptación', about: 'Define cómo se ve un trabajo terminado', evaluator: 'haiku', levels: ['Ninguno', 'Vago («que quede bien»)', 'Uno verificable', 'Varios verificables', 'Pasa o falla con prueba concreta'] },
+  { id: 'criterios', category: 'estructura', name: 'Criterios de aceptación', about: 'Define cómo se ve un trabajo terminado', evaluator: 'haiku', levels: ['Ninguno', 'Vago («que quede bien»)', 'Uno verificable', 'Varios verificables', 'Da una prueba de pasa o falla que Claude puede correr solo'] },
   { id: 'edge_cases', category: 'estructura', name: 'Casos borde', about: 'Anticipa excepciones y datos raros', evaluator: 'haiku', levels: ['Nunca', 'Reacciona cuando fallan', 'Menciona alguno', 'Los enumera antes', 'Los pide probar uno por uno'] },
   { id: 'exploracion', category: 'estructura', name: 'Exploración', about: 'Hace preguntas abiertas antes de decidir', evaluator: 'haiku', levels: ['Solo órdenes', 'Preguntas cerradas', 'Alguna pregunta abierta', 'Explora opciones antes de decidir', 'Contrasta alternativas y supuestos'] },
+  { id: 'descubrimiento', category: 'estructura', name: 'Descubrimiento', about: 'Reconoce lo que no sabe y le pide a Claude preguntar, explicar o mostrar lo que falta antes de actuar', evaluator: 'haiku', levels: ['Ordena sin admitir dudas ni pedir preguntas', 'Pide una explicación suelta sin decir qué no entiende', 'Dice qué no entiende o no sabe y pide que se lo expliquen o le den opciones', 'Pide que Claude le pregunte antes de actuar, o pros y contras para decidir algo que no domina', 'Pide que lo entreviste hasta tener todo claro, pregunta qué le falta considerar y usa las respuestas para decidir'] },
   { id: 'verificacion', category: 'estructura', name: 'Verificación', about: 'Pide evidencia, no la palabra de Claude', evaluator: 'haiku', levels: ['Acepta todo', 'Pregunta si quedó', 'Pide revisar', 'Pide evidencia (salida, captura, cifra)', 'Exige prueba reproducible y la revisa'] },
-  { id: 'iteracion', category: 'estructura', name: 'Iteración crítica', about: 'Cuestiona la respuesta y la mejora', evaluator: 'haiku', levels: ['Acepta la primera', 'Repite la misma orden', 'Corrige un detalle', 'Señala el error y por qué', 'Reencuadra el problema cuando hace falta'] },
+  { id: 'iteracion', category: 'estructura', name: 'Iteración crítica', about: 'Cuestiona la respuesta y la mejora', evaluator: 'haiku', levels: ['Acepta la primera', 'Repite la misma orden', 'Corrige un detalle', 'Señala el error y por qué', 'Tras dos correcciones fallidas, replantea el problema con lo aprendido'] },
   { id: 'descomposicion', category: 'estructura', name: 'Descomposición', about: 'Parte un problema grande en pasos', evaluator: 'haiku', levels: ['Todo en una orden', 'Pasos implícitos', 'Algunos pasos', 'Pasos ordenados', 'Fases con entregables y dependencias'] },
   { id: 'precision', category: 'estructura', name: 'Precisión', about: 'Nombra el archivo, el dato o el síntoma exacto', evaluator: 'haiku', levels: ['Ambiguo', 'General', 'Concreto en parte', 'Concreto', 'Exacto: dónde, qué y cuánto'] },
   { id: 'documentacion', category: 'sistema', name: 'Documentación', about: 'Deja registro reutilizable: handover, reglas, skills', evaluator: 'haiku', levels: ['Nunca', 'Rara vez', 'A veces pide resumen', 'Pide dejar registro', 'Convierte lo aprendido en reglas o skills'] },
@@ -83,6 +85,8 @@ const RULES = [
   'Valor no exige dinero: un indicador operativo (tiempo de respuesta, conversión, errores, entregas a tiempo, satisfacción) cuenta igual que pesos.',
   'Sistematización premia convertir el trabajo en sistema: comandos, skills, SOPs, loops con criterio de salida, tareas programadas, agentes que revisan a otros agentes.',
   'Un prompt corto y exacto puede valer más que uno largo y vago. El idioma coloquial no resta.',
+  'No suman las frases de relleno ni el énfasis: «piensa bien», «sé exhaustivo», «no te detengas», MAYÚSCULAS o «IMPORTANTE». Cuenta la información, el criterio o la prueba que la persona entrega.',
+  'Descubrimiento exige que la persona reconozca una duda propia y use a Claude para resolverla: que le pregunte, le explique o le muestre lo que no vio. Pedir opciones sin admitir duda cuenta en exploracion, no aquí. «Pregúntame» como muletilla repetida, sin contestar ni usar las preguntas, vale 2. Preguntar un dato («¿cuánto es?») no es descubrimiento.',
 ]
 
 // The stable prefix of every Haiku call: rubric and rules first, so the prompt cache holds it.

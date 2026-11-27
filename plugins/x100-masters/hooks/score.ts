@@ -1,6 +1,6 @@
 // Pure scoring: daily usage counters → code metrics, text levels → profile. No engine calls here.
 import { ALL_METRICS, CATEGORIES, CODE_METRICS, TEXT_METRICS, TIERS, WEIGHTS, levelOf } from './rubric'
-import type { Category, Evaluator, MastersProfile, MetricResult, Recommendation } from '../types'
+import type { Category, Evaluator, MastersProfile, MetricResult, Potential, Recommendation } from '../types'
 
 export type Day = {
   prompts: number
@@ -45,10 +45,14 @@ export const isSystemFile = (path: string) => SYSTEM_FILE.test(path)
 export const AUTOMATION_TOOLS = new Set(['CronCreate', 'ScheduleWakeup', 'Monitor', 'RemoteTrigger', 'mcp:scheduled-tasks'])
 export const AUTOMATION_SKILLS = new Set(['loop', 'schedule'])
 
-const PLAN = /\b(plan|spec|especificaci[oó]n|fases?|antes de ejecutar|no escribas c[oó]digo)\b/i
+const PLAN = /\b(dame|arma|haz|escribe|prop[oó]n|pres[eé]ntame|prep[aá]rame)\s+(primero\s+)?(un|el|tu)\s+plan\b|\bantes de (hacer|ejecutar|construir|empezar|tocar|cambiar)\b|\bno (hagas|escribas|cambies|toques) nada\b|\bespera mi (ok|visto bueno|aprobaci[oó]n)\b|\bspec\b|\bespecificaci[oó]n\b|\bentrev[ií]stame\b|\bhazme (las |unas )?preguntas\b|\best[aá] (listo|terminado) cuando\b|^\s*\/(plan|goal)\b/i
 
 export const mentionsFile = (text: string) => FILE.test(text)
 export const mentionsPlan = (text: string) => PLAN.test(text)
+// Tools that show a spec step: a plan presented, or Claude interviewing the person.
+export const SPEC_TOOLS = new Set(['ExitPlanMode', 'AskUserQuestion'])
+const SPEC_FILE = /(^|[\\/])(spec|plan|especificaci[oó]n)[\w .-]*\.md$/i
+export const isSpecFile = (path: string) => SPEC_FILE.test(path)
 
 // The raw value of each code metric over the kept days.
 export const codeValues = (usage: Usage): Record<string, number> => {
@@ -190,6 +194,9 @@ export const buildProfile = (
   const scored = CATEGORIES.filter(category => categories[category] !== null)
   const weight = scored.reduce((total, category) => total + WEIGHTS[category], 0)
   const score = weight === 0 ? 0 : Math.round(scored.reduce((total, category) => total + WEIGHTS[category] * (categories[category] as number), 0) / weight)
+  const real = potentialLevels(kept, dayText, now, Object.fromEntries(metrics.map(metric => [metric.id, metric.level])))
+  for (const metric of metrics) metric.potential = real.levels[metric.id] ?? null
+  const potential: Potential | null = real.days === 0 ? null : { score: real.score, tier: real.tier, categories: real.categories, confidence: real.confidence }
   const used = active.reduce((total, key) => total + (kept[key]?.prompts ?? 0), 0)
 
   return {
@@ -203,6 +210,7 @@ export const buildProfile = (
     prompts: used,
     days: active.length,
     trend,
+    potential,
     updatedAt: at,
   }
 }
@@ -218,5 +226,101 @@ export const parseJson = (text: string): Record<string, unknown> | undefined => 
     return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
   } catch {
     return undefined
+  }
+}
+
+// ── Nivel real ────────────────────────────────────────────────────────────────────────────────────────
+// The level a person has shown on their good working days of the last 30, next to the «momento actual»
+// (the plain average of the last 10 active days). Light days never count against it; one great day never makes it.
+export const REAL = {
+  minPrompts: 8, // a day with fewer prompts is a light day
+  minTokens: 50_000, // …and so is one under the first «consumo» cut
+  rampFrom: 2, // days of evidence that still prove nothing
+  rampTo: 6, // days of evidence for full confidence
+  topCode: 0.5, // counted metrics: the better half of the days
+  topText: 0.3, // read metrics: the best three in ten days
+  minTop: 3, // never fewer than three days in the top
+  crackScore: 80,
+  crackConfidence: 0.75,
+} as const
+
+// Counted over the whole period: one day alone says nothing about them.
+const PERIOD_METRICS = new Set(['adopcion', 'variedad'])
+
+export const isSubstantive = (day: Day | undefined): day is Day => day !== undefined && day.prompts >= REAL.minPrompts && day.tokens >= REAL.minTokens
+
+// The Potential of types/index.d.ts (score, tier, categories, confidence) plus what the spider and the audit need.
+export type PotentialLevels = Potential & {
+  // Level 1-5 per metric, never under the current one; null when nothing was ever seen. Goes to MetricResult.potential.
+  levels: Record<string, number | null>
+  // Substantive days with evidence behind each metric.
+  evidence: Record<string, number>
+  // Substantive days in the window.
+  days: number
+  crack: boolean
+}
+
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
+const sureOf = (days: number) => clamp01((days - REAL.rampFrom) / (REAL.rampTo - REAL.rampFrom))
+
+// `current` is the level of each metric in the «momento actual» web (profile.metrics), so the real web never falls inside it.
+export const potentialLevels = (usage: Usage, dayText: DayText, now: number, current: Record<string, number | null | undefined> = {}): PotentialLevels => {
+  const kept = prune(usage, now)
+  const keys = Object.keys(kept).filter(key => isSubstantive(kept[key])).sort()
+  const period = codeValues(kept)
+  // Each substantive day on its own: code from that day's counters alone, text from that day's readings.
+  const perDay = keys.map(key => {
+    const values = codeValues({ [key]: kept[key] as Day })
+    const levels: Record<string, number | undefined> = {}
+    for (const metric of CODE_METRICS) if (!PERIOD_METRICS.has(metric.id)) levels[metric.id] = levelOf(values[metric.id] ?? 0, metric.cuts)
+    for (const metric of TEXT_METRICS) levels[metric.id] = readingOf(dayText[key]?.[metric.id])
+    return levels
+  })
+  const levels: Record<string, number | null> = {}
+  const evidence: Record<string, number> = {}
+  const trust: number[] = []
+
+  for (const metric of ALL_METRICS) {
+    const shown = current[metric.id] ?? null
+    if (PERIOD_METRICS.has(metric.id)) {
+      const cuts = CODE_METRICS.find(item => item.id === metric.id)?.cuts ?? []
+      const whole = Object.keys(kept).length === 0 ? null : levelOf(period[metric.id] ?? 0, cuts)
+      levels[metric.id] = whole === null ? shown : round1(Math.max(whole, shown ?? 1))
+      evidence[metric.id] = keys.length
+      trust.push(sureOf(keys.length))
+      continue
+    }
+    const seen = perDay
+      .map(day => day[metric.id])
+      .filter((level): level is number => level !== undefined)
+      .sort((a, b) => b - a)
+    const share = metric.evaluator === 'codigo' ? REAL.topCode : REAL.topText
+    const top = mean(seen.slice(0, Math.max(REAL.minTop, Math.ceil(seen.length * share))))
+    const base = shown ?? mean(seen)
+    const sure = sureOf(seen.length)
+    evidence[metric.id] = seen.length
+    trust.push(sure)
+    levels[metric.id] = base === null || top === null ? base : round1(base + sure * Math.max(0, top - base))
+  }
+
+  const inCategory = (category: Category) =>
+    ALL_METRICS.filter(metric => metric.category === category)
+      .map(metric => levels[metric.id])
+      .filter((level): level is number => typeof level === 'number')
+  const categories = Object.fromEntries(CATEGORIES.map(category => [category, toPercent(inCategory(category))])) as Record<Category, number | null>
+  const scored = CATEGORIES.filter(category => categories[category] !== null)
+  const weight = scored.reduce((total, category) => total + WEIGHTS[category], 0)
+  const score = weight === 0 ? 0 : Math.round(scored.reduce((total, category) => total + WEIGHTS[category] * (categories[category] as number), 0) / weight)
+  const confidence = Math.round((mean(trust) ?? 0) * 100) / 100
+
+  return {
+    levels,
+    evidence,
+    confidence,
+    days: keys.length,
+    categories,
+    score,
+    tier: TIERS[Math.min(4, Math.floor(score / 20))] ?? 'Inicial',
+    crack: score >= REAL.crackScore && confidence >= REAL.crackConfidence,
   }
 }
