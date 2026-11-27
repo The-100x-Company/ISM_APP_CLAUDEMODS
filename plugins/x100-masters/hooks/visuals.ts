@@ -369,6 +369,23 @@ const PORTAL_JS = String.raw`(() => {
     const tick = now => { const p = calm ? 1 : Math.max(0, Math.min(1, (now - t0) / 1700)); el.textContent = Math.round(to * (1 - Math.pow(1 - p, 4))); if (p < 1) requestAnimationFrame(tick) }
     requestAnimationFrame(tick)
   })
+  // The dots run the whole gap between the two numbers, at the numbers' vertical center.
+  const flowEl = document.getElementById('flow')
+  if (flowEl) {
+    const box = flowEl.parentElement, a = box.querySelector('.big.real b'), b = box.querySelector('.big.now b')
+    const place = () => {
+      const r = box.getBoundingClientRect(), ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
+      const gap = rb.left - ra.right - 32
+      flowEl.hidden = gap < 24 || rb.top > ra.bottom
+      flowEl.style.left = (ra.right - r.left + 16) + 'px'
+      flowEl.style.width = Math.max(0, gap) + 'px'
+      flowEl.style.top = ((ra.top + ra.bottom) / 2 - r.top) + 'px'
+    }
+    place()
+    addEventListener('load', place); addEventListener('resize', place); setTimeout(place, 2200)
+    try { document.fonts.ready.then(place) } catch (e) {}
+    try { new ResizeObserver(place).observe(a); new ResizeObserver(place).observe(b); new ResizeObserver(place).observe(box) } catch (e) {}
+  }
   addEventListener('scroll', () => document.body.classList.toggle('scrolled', scrollY > 120), { passive: true })
   // Each category rises in and replays its drawing when it scrolls into view.
   const io = new IntersectionObserver(entries => entries.forEach(entry => {
@@ -657,6 +674,13 @@ const PORTAL_JS = String.raw`(() => {
       svg += '<line x1="' + cx + '" y1="' + cy + '" x2="' + x.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="' + (hl === a ? '#6D92D6' : '#24272A') + '" stroke-width="' + (hl === a ? 1.6 : 1) + '"/><text x="' + lx.toFixed(1) + '" y="' + (ly + 4).toFixed(1) + '" text-anchor="' + anchor + '" font-size="' + (mode === 'cat' ? 17 : 10.5) + '" fill="' + (hl === a ? '#E6E8EA' : on ? '#A9ADB1' : '#4B4F55') + '"' + (hl === a ? ' font-weight="600"' : '') + '>' + esc(label(a)) + '</text>'
     })
     const shown = idx.map(k => people[k])
+    const withData = shown.filter(p => axes.some(a => val(p, a) > 0))
+    if (withData.length < 2) {
+      svg += '<text x="' + cx + '" y="' + (cy - 8) + '" text-anchor="middle" fill="#A9ADB1" font-size="22" font-family="Host Grotesk, Segoe UI, system-ui, sans-serif">Aquí verás el Spiderweb del equipo</text>'
+      svg += '<text x="' + cx + '" y="' + (cy + 22) + '" text-anchor="middle" fill="#84888E" font-size="15" font-family="Host Grotesk, Segoe UI, system-ui, sans-serif">Aparece cuando al menos 2 personas reinicien Claude y envíen sus datos.</text></svg>'
+      TW.querySelector('.tw-body').innerHTML = svg
+      return
+    }
     const avg = axes.map(a => shown.reduce((t, p) => t + val(p, a), 0) / Math.max(1, shown.length))
     idx.forEach(k => {
       const p = people[k], on = picked.has(k), dim = picked.size > 0 && !on
@@ -680,7 +704,15 @@ const PORTAL_JS = String.raw`(() => {
     const all = people.map((p, k) => ({ p, k, v: mval(p) })).filter(x => x.v !== null && x.v !== undefined)
     const title = measure === 'total' ? 'Puntaje total' : isCat() ? (CATS[measure.slice(4)] || [measure])[0] : NAMES[measure.slice(4)][0]
     GA.querySelector('.g-t').textContent = title + (by === 'real' ? ' · nivel real' : ' · momento actual')
-    if (all.length < 3) { body.innerHTML = '<p class="empty">Aún no hay suficientes personas con este dato para dibujar la distribución.</p>'; return }
+    if (all.length < 3) {
+      const lg = GA.querySelector('.g-lg'); if (lg) lg.innerHTML = ''
+      let ph = '', i = 0
+      for (; i <= 80; i++) { const x = 40 + i * 11, y = 230 - 190 * Math.exp(-Math.pow((i - 40) / 15, 2) / 2); ph += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) }
+      body.innerHTML = '<svg viewBox="0 0 940 280" class="g-svg" role="img" aria-label="Campana del equipo, aún sin datos"><path d="M40 230H920" stroke="#3A3E43"/><path d="' + ph + '" fill="none" stroke="#6D92D6" stroke-opacity=".35" stroke-width="1.6" stroke-dasharray="6 6"/>'
+        + '<text x="470" y="120" text-anchor="middle" fill="#A9ADB1" font-size="20" font-family="Host Grotesk, Segoe UI, system-ui, sans-serif">Aquí verás la campana del equipo</text>'
+        + '<text x="470" y="148" text-anchor="middle" fill="#84888E" font-size="14" font-family="Host Grotesk, Segoe UI, system-ui, sans-serif">Aparece cuando al menos 3 personas tengan este dato. Hoy lo tienen ' + all.length + '.</text></svg>'
+      return
+    }
     const lo = 0, hi = isDim() ? 5 : 100, N = all.length
     const mean = all.reduce((t, x) => t + x.v, 0) / N
     const sd = Math.max(Math.sqrt(all.reduce((t, x) => t + (x.v - mean) * (x.v - mean), 0) / N), (hi - lo) * .01)
@@ -833,7 +865,7 @@ ${group === undefined ? '' : `<div class="mates"><span>Media del equipo <b>${gro
 ${tips.length === 0 ? '' : `<h3>Cómo subir</h3><ul>${tips.map(tip => `<li>${esc(tip)}</li>`).join('')}</ul>`}</aside></section>`
   }).join('')
   const teamJson = json(team)
-  const flow = `<div class="flow" aria-hidden="true"><div class="lane r">${[0, 1, 2, 3, 4].map(k => `<i style="--k:${k}"></i>`).join('')}</div><div class="lane l">${[0, 1, 2, 3, 4].map(k => `<i style="--k:${k}"></i>`).join('')}</div></div>`
+  const flow = `<div class="flow" id="flow" aria-hidden="true"><div class="lane r">${[0, 1, 2, 3, 4].map(k => `<i style="--k:${k}"></i>`).join('')}</div><div class="lane l">${[0, 1, 2, 3, 4].map(k => `<i style="--k:${k + 0.5}"></i>`).join('')}</div></div>`
   const head = real === null
     ? `<div class="score one"><div class="big now"><small>${NOW_NAME}</small><b class="count" data-to="${profile.score}">0</b><span class="tier">${esc(profile.tier)}</span><p>${esc(NOW_ABOUT)}</p></div></div>`
     : `<div class="score"><div class="big real"><small>${REAL_NAME}</small><b class="count" data-to="${real.score}">0</b><span class="tier">${esc(real.tier)}</span><p>${esc(real.confidence < 0.5 ? REAL_UNSURE : REAL_ABOUT)}</p></div>${flow}
@@ -856,18 +888,18 @@ canvas#field{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none
 h1{font-weight:470;font-size:clamp(2.6rem,7.5vw,7rem);letter-spacing:-.045em;line-height:.9;margin:0}
 h1 span{display:inline-block;opacity:0;transform:translateY(.4em);animation:rise .9s cubic-bezier(.16,1,.3,1) forwards}
 .by{color:var(--ink3);font-size:15px;opacity:0;animation:fade 1s .6s forwards}
-.score{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:clamp(10px,2vw,28px);align-items:stretch;margin-top:10px;max-width:980px}
+.score{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(10px,2vw,28px);align-items:stretch;margin-top:10px;max-width:980px}
 .score.one{grid-template-columns:minmax(0,480px)}
 .big{display:flex;flex-direction:column;gap:4px;min-width:0;padding:6px 0;opacity:0;animation:fade 1s .9s forwards}
 .big small{font:11px ${MONO};letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
-.big b{font:400 clamp(4rem,10vw,8rem)/.9 ${MONO};letter-spacing:-.07em}
+.big b{align-self:flex-start;font:400 clamp(4rem,10vw,8rem)/.9 ${MONO};letter-spacing:-.07em}
 .big.real b{color:var(--warm)}.big.now b{color:var(--ink)}
 .big .tier{font-size:clamp(1.2rem,2.4vw,2rem);color:var(--accent)}.big.real .tier{color:var(--warm)}
 .big p{margin:6px 0 0;color:var(--ink3);font-size:13.5px;line-height:1.45}
-.flow{position:relative;width:clamp(70px,10vw,140px);align-self:center;height:44px}
-.lane{position:absolute;left:0;right:0;height:10px}.lane.r{top:8px}.lane.l{top:28px}
-.lane i{position:absolute;top:3px;left:0;width:4px;height:4px;border-radius:50%;opacity:0;animation:travel-r 5s cubic-bezier(.45,0,.25,1) infinite;animation-delay:calc(var(--k)*1s)}
-.lane.r i{background:var(--warm)}.lane.l i{background:var(--accent);animation-name:travel-l}
+.flow{position:absolute;left:0;top:0;width:0;height:8px;pointer-events:none;transform:translateY(-50%)}
+.lane{position:absolute;left:0;right:0;top:0;height:8px}
+.lane i{position:absolute;top:2px;left:0;width:4px;height:4px;border-radius:50%;opacity:0;animation:travel-r 5s cubic-bezier(.45,0,.25,1) infinite;animation-delay:calc(var(--k)*1s)}
+.lane.r i{background:#E6E8EA}.lane.l i{background:#84888E;animation-name:travel-l}
 @keyframes travel-r{0%{left:0;opacity:0}15%{opacity:.7}85%{opacity:.7}100%{left:calc(100% - 4px);opacity:0}}
 @keyframes travel-l{0%{left:calc(100% - 4px);opacity:0}15%{opacity:.7}85%{opacity:.7}100%{left:0;opacity:0}}
 @media (max-width:720px){.score{grid-template-columns:minmax(0,1fr)}.flow{display:none}}

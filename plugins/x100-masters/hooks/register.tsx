@@ -20,7 +20,7 @@ import type { TalentStore } from './talent-score'
 // and tool, Haiku reads each 10-prompt window and Sonnet does the full evaluation once a day.
 
 const PANE = 'x100-masters'
-const VERSION = '0.5.2'
+const VERSION = '0.5.3'
 // The band speaks in first person; the portal keeps «Tu Claude Score».
 const BAND_TITLE = 'Mi Claude Score'
 const SWEEP = 'v3'
@@ -266,13 +266,14 @@ const send = async ($: EngineInterface, trigger: Trigger) => {
 const fetchTeam = async ($: EngineInterface): Promise<Team | null> => {
   const alta = await enroll($, await identity($))
   if (alta?.llave === undefined) return null
-  const cached = await load<{ at: number; team: Team | null }>($, 'team', { at: 0, team: null })
-  if (cached.team !== null && cached.team.ranking !== undefined && Date.now() - cached.at < 60 * 60_000) return cached.team
+  // Ten minutes, and never across versions: a role or a field the server just learned shows up at once.
+  const cached = await load<{ at: number; team: Team | null; v?: string }>($, 'team', { at: 0, team: null })
+  if (cached.team !== null && cached.v === VERSION && cached.team.ranking !== undefined && Date.now() - cached.at < 10 * 60_000) return cached.team
   const team = await $.http
     .fetch(TEAM_ENDPOINT, { method: 'POST', headers: HEADERS, body: JSON.stringify({ p_llave: alta.llave }) })
     .then(response => (response.ok ? (JSON.parse(response.text) as Team) : null))
     .catch(() => null)
-  if (team !== null) await $.store.set('team', { at: Date.now(), team })
+  if (team !== null) await $.store.set('team', { at: Date.now(), team, v: VERSION })
   return team ?? cached.team
 }
 
@@ -533,9 +534,8 @@ export const register: Register = on => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Text } = elements
     const Svg = 'Svg' in elements ? elements.Svg : undefined
-    const shown = await read($, profile)
+    await read($, profile) // redraw when the score changes
     const hint = await read($, nudge)
-    const score = shown === null ? '' : ` · ${shown.potential?.score ?? shown.score}`
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
@@ -543,11 +543,11 @@ export const register: Register = on => {
         <Box key="masters" flexDirection="row" alignItems="center" gap={1}>
           {Svg ? <Svg key="masters-web" source={webIcon(20)} alt={TITLE} width={20} height={20} /> : null}
           {/* The name is the link: it opens the web portal; /masters still opens the panel. */}
-          <Button key="masters-open" plain label={`${BAND_TITLE}: abrir el portal`} onPress={() => openReport($)}>
-            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{`↗ ${BAND_TITLE}${score}`}</Text>
+          <Button key="masters-open" plain label={`${BAND_TITLE} ↗`} onPress={() => openReport($)}>
+            <Text color="#A9ADB1" hover={{ color: '#E6E8EA' }}>{`${BAND_TITLE} ↗`}</Text>
           </Button>
           {hint === null ? null : (
-            <Button key="masters-nudge" plain label={hint.text} onPress={() => openReport($)}>
+            <Button key="masters-nudge" plain label={hint.tip === true ? `Tip: ${hint.text}` : `${hint.icon} ${hint.text}`} onPress={() => openReport($)}>
               <Text color="#E9D25B" hover={{ color: '#E6E8EA' }}>{hint.tip === true ? `Tip: ${hint.text}` : `${hint.icon} ${hint.text}`}</Text>
             </Button>
           )}
