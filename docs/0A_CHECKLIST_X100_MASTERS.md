@@ -70,6 +70,7 @@ Hilo E · Líneas base por seniority (dueño de `hooks/rubric.ts`, `hooks/score.
 - E2. Línea base por dimensión: valores esperados de la métrica para Junior, Semi-senior, Senior y Referente (por ejemplo, % de prompts con criterio de terminado) y la curva que los lleva a 0–100 (Junior ≈ 25, Semi-senior ≈ 45, Senior ≈ 70, Referente ≈ 90), con la fuente o el razonamiento de cada corte.
 - E3. Personas sintéticas de referencia (una por nivel, con historial de prompts sintético): prueba que cada una cae en su banda en las 41 dimensiones, en el ADN y en las áreas. Si una dimensión no separa Junior de Senior, se reporta.
 - E4. Exportar la línea base (`BASELINE`) para que el portal pueda dibujar anillos de referencia Junior/Senior en los Spiderweb (el dibujo lo integra la sesión integradora).
+- E5. El 100 % de lo evaluado lleva línea base: 41 dimensiones, 4 categorías, Nivel real, Nivel momentáneo, 11 arquetipos y par de talento, 43 subáreas y 8 áreas, especialista/generalista. Los cortes los decide una mesa de asesores (investigador de adopción de IA, líder de AI enablement, psicólogo organizacional de competencias, líder de operaciones de negocio, científico de datos con la distribución real agregada): tabla elemento | cortes | consenso | disenso | fuente; sin consenso gana la mediana.
 - D usa la misma escala E1 en `areas-rubric.ts` (5 anclas 0–4 en lugar de 4).
 
 ## Estilo (design system 100x, tema oscuro)
